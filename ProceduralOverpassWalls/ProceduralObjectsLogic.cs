@@ -97,6 +97,16 @@ namespace ProceduralObjects
         private static AudioClip[] audiosClips;
 
         private bool isGPUSupportInstancing = false;
+        private int frameCount;
+        private double renderTimeSum;
+        private DateTime startRenderTime;
+        private ConcurrentDictionary<Mesh, ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, Color>>> equivalentDict
+                    = new ConcurrentDictionary<Mesh, ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, Color>>>();
+        private ConcurrentDictionary<Mesh, Material> equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
+        private ConcurrentDictionary<int, Matrix4x4> customDict = new ConcurrentDictionary<int, Matrix4x4>();
+        private ConcurrentDictionary<int, Matrix4x4> overlayDict = new ConcurrentDictionary<int, Matrix4x4>();
+        private MaterialPropertyBlock propertyBlock;
+        private Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]> equivalentDictCache;
 
         void Start()
         {
@@ -196,7 +206,14 @@ namespace ProceduralObjects
             LocaleManager.eventLocaleChanged += SelectSetupLocalization;
 
             // Tests for DrawMeshInstanced on props with meshStatus==1
-            isGPUSupportInstancing = SystemInfo.supportsInstancing;
+            isGPUSupportInstancing = SystemInfo.supportsInstancing; 
+            equivalentDict = new ConcurrentDictionary<Mesh, ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, Color>>>();
+            equivalentDictCache = new Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]>();
+            equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
+            customDict = new ConcurrentDictionary<int, Matrix4x4>();
+            overlayDict = new ConcurrentDictionary<int, Matrix4x4>();
+            propertyBlock = new MaterialPropertyBlock();
+            propertyBlock.SetColor("_Color", Color.white);
 
             if (isGPUSupportInstancing && proceduralObjects != null)
             {
@@ -217,6 +234,8 @@ namespace ProceduralObjects
 
                 }
             }
+
+            startRenderTime = DateTime.Now;
 
             loadingTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
             Debug.Log("[ProceduralObjects] Game start procedure ended in " + loadingTime + " seconds");
@@ -307,15 +326,18 @@ namespace ProceduralObjects
                 CallConvertToPO(ToolsModifierControl.toolController.CurrentTool);
             }
 
-            if (proceduralObjects != null)
+            frameCount++;
+            var startTime = DateTime.Now;
+            var timeFromLastUpdate = Math.Round((DateTime.Now - startRenderTime).TotalMilliseconds, 2);
+
+            if (proceduralObjects != null && timeFromLastUpdate >= 100.0)
             {
                 var sqrDynMinThreshold = ProceduralObjectsMod.DynamicRDMinThreshold.value * ProceduralObjectsMod.DynamicRDMinThreshold.value;
                 bool isNightTime = Singleton<SimulationManager>.instance.m_isNightTime;
-                ConcurrentDictionary<Mesh, ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, MaterialPropertyBlock>>> equivalentDict 
-                    = new ConcurrentDictionary<Mesh, ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, MaterialPropertyBlock>>>();
-                ConcurrentDictionary<Mesh, Material> equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
-                ConcurrentDictionary<int, Matrix4x4> customDict = new ConcurrentDictionary<int, Matrix4x4>();
-                ConcurrentDictionary<int, Matrix4x4> overlayDict = new ConcurrentDictionary<int, Matrix4x4>();
+                equivalentDict.Clear();
+                equivalentMtlDict.Clear();
+                customDict.Clear();
+                overlayDict.Clear();
 
                 int stepSize = 1000;
                 List<Task> calcTasks = new List<Task>();
@@ -362,24 +384,24 @@ namespace ProceduralObjects
                                 Matrix4x4 m4x4 = Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one);
                                 if (RenderOptions.instance.CanRenderSingle(obj, isNightTime))
                                 {
-                                    // For test only, material differences like custom texts/rects and colors are not yet considered.
+                                    // For test only, material differences like custom texts/rects are not yet considered.
                                     if (obj.meshStatus == 2 || !isGPUSupportInstancing)
                                     {
                                         customDict.TryAdd(i, m4x4);
                                     }
                                     else if (obj.meshStatus == 1 && isGPUSupportInstancing)
                                     {
-                                        Tuple<Matrix4x4, ShadowCastingMode, MaterialPropertyBlock> itemTuple =
-                                            new Tuple<Matrix4x4, ShadowCastingMode, MaterialPropertyBlock>(m4x4, obj.disableCastShadows ? ShadowCastingMode.Off : ShadowCastingMode.On, new MaterialPropertyBlock());
-                                        itemTuple.Third.SetColor("_Color", obj.m_color);
+                                        Tuple<Matrix4x4, ShadowCastingMode, Color> itemTuple =
+                                            new Tuple<Matrix4x4, ShadowCastingMode, Color>(m4x4, obj.disableCastShadows ? ShadowCastingMode.Off : ShadowCastingMode.On, obj.m_color);
+                                        //itemTuple.Third.SetColor("_Color", obj.m_color);
                                         if (equivalentDict.ContainsKey(obj.m_mesh))
                                         {
                                             equivalentDict[obj.m_mesh].Enqueue(itemTuple);
-                                        } 
+                                        }
                                         else
                                         {
-                                            ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, MaterialPropertyBlock>> newQueue = 
-                                                new ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, MaterialPropertyBlock>>();
+                                            ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, Color>> newQueue =
+                                                new ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, Color>>();
                                             newQueue.Enqueue(itemTuple);
                                             equivalentDict.TryAdd(obj.m_mesh, newQueue);
                                         }
@@ -420,6 +442,13 @@ namespace ProceduralObjects
                 }
 
                 Task.WaitAll(calcTasks.ToArray());
+
+                equivalentDictCache.Clear();
+                foreach (var pair in equivalentDict)
+                {
+                    equivalentDictCache.Add(pair.Key, pair.Value.ToArray());
+                }
+                startRenderTime = DateTime.Now;
 
 
                 // Original Version
@@ -482,12 +511,21 @@ namespace ProceduralObjects
                         }
                     }
                 }*/
+            }
+            if (proceduralObjects != null)
+            {
                 try
                 {
 
-                    //if (equivalentScratchpad.Count > 0) 
-                    //    Debug.Log("[ProceduralObjects] Preparing DrawMeshInstanced with " + equivalentScratchpad.Count + " instanced mesh(es).");
-                    foreach (var pair in equivalentDict)
+                    /*if (equivalentDict.Count > 0)
+                    {
+                        Debug.Log("[ProceduralObjects] Preparing DrawMeshInstanced with " + equivalentScratchpad.Count + " instanced mesh(es).");
+                    }*/
+                    if (equivalentDictCache.Count == 0)
+                    {
+                        Debug.Log("[ProceduralObjects] DrawMesh code block has no instanced mesh(es) to draw.");
+                    }
+                    foreach (var pair in equivalentDictCache)
                     {
                         /*if (pair.Value.Count <= 1000)
                         {
@@ -526,10 +564,10 @@ namespace ProceduralObjects
                             }
 
                         }*/
-                        Tuple<Matrix4x4, ShadowCastingMode, MaterialPropertyBlock> currTuple = null;
-                        while (pair.Value.TryDequeue(out currTuple))
+                        foreach (Tuple<Matrix4x4, ShadowCastingMode, Color> item in pair.Value)
                         {
-                            Graphics.DrawMesh(pair.Key, currTuple.First, equivalentMtlDict[pair.Key], 0, renderCamera, 0, currTuple.Third, currTuple.Second, true);
+                            propertyBlock.SetColor("_Color", item.Third);
+                            Graphics.DrawMesh(pair.Key, item.First, equivalentMtlDict[pair.Key], 0, renderCamera, 0, propertyBlock, item.Second, true);
                         }
                     }
 
@@ -549,6 +587,17 @@ namespace ProceduralObjects
                 {
                     Debug.LogError("[ProceduralObjects] Error while rendering objects " + e.Message + " - Stack Trace : " + e.StackTrace);
                 }
+
+
+                var frameRenderTime = Math.Round((DateTime.Now - startTime).TotalMilliseconds, 2);
+                renderTimeSum += frameRenderTime;
+                if (frameCount == 1000)
+                {
+                    Debug.Log("[ProceduralObjects] Calculation of Procedural Objects in most recent 1000 frames consumed " + Math.Round(renderTimeSum / 1000, 2) + " milliseconds per frame.");
+                    frameCount = 0;
+                    renderTimeSum = 0.0;
+                }
+
 
                 if (moduleManager.enabledModules.Count > 0)
                 {
