@@ -26,9 +26,15 @@ namespace ProceduralObjects
             ProceduralObjectsLogic logic = ProceduralObjectsMod.gameLogicObject.GetComponent<ProceduralObjectsLogic>();
             if (logic == null)
                 return;
+
+            // TODO: Get rid of BinaryFormatter and choose XmlSerializer instead. Will need to have transitional saves data, data comparison tests and old data detection.
             BinaryFormatter bFormatter = new BinaryFormatter();
+
+            // Need to properly seperate dataContainer into multiple entries before serializing into MemoryStream, and multithread to do serialization. 
+            // MemoryStream is backed by a byte[] and arrays maximum length is int.MaxValue, see https://stackoverflow.com/questions/27112697/datatypes-for-memorystream-capacity-vs-memorystream-length
             ProceduralObjectContainer[] dataContainer = logic.GetContainerList();
             Layer[] layerContainer = logic.layerManager.m_layers.ToArray();
+
             try
             {
                 if (dataContainer != null)

@@ -217,6 +217,7 @@ namespace ProceduralObjects.Classes
             renderDistLocked = container.renderDistLocked;
             if (container.textParam != null)
             {
+                meshStatus = 2;
                 m_textParameters = TextParameters.Clone(container.textParam, true);
                 for (int i = 0; i < m_textParameters.Count(); i++)
                 {

@@ -1,6 +1,8 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
+using System.Collections.Concurrent;
 using System;
 using UnityEngine.Rendering;
 using UnityEngine;
@@ -195,19 +197,24 @@ namespace ProceduralObjects
 
             // Tests for DrawMeshInstanced on props with meshStatus==1
             isGPUSupportInstancing = SystemInfo.supportsInstancing;
+
             if (isGPUSupportInstancing && proceduralObjects != null)
             {
                 string instancingKeyword = "INSTANCING_ON";
                 for (int i = 0; i < proceduralObjects.Count; i++)
                 {
-                    if (proceduralObjects[i].meshStatus == 1 && !proceduralObjects[i].m_material.IsKeywordEnabled(instancingKeyword))
+                    var obj = proceduralObjects[i];
+                    if (obj.meshStatus == 1 && !obj.m_material.IsKeywordEnabled(instancingKeyword))
                     {
-                        proceduralObjects[i].m_material.EnableKeyword(instancingKeyword);
+                        obj.m_material.EnableKeyword(instancingKeyword);
+#if DEBUG
                         Debug.Log(string.Format("[ProceduralObjects] Modifing {0}, {1}, {2} properties of shader {3} to {4}, {5}, {6}",
                             instancingKeyword, "", "", 
                             proceduralObjects[i].m_material.shader.name, 
                             proceduralObjects[i].m_material.IsKeywordEnabled(instancingKeyword), proceduralObjects[i].m_material.IsKeywordEnabled(instancingKeyword), proceduralObjects[i].m_material.IsKeywordEnabled(instancingKeyword)));
+#endif
                     }
+
                 }
             }
 
@@ -304,9 +311,119 @@ namespace ProceduralObjects
             {
                 var sqrDynMinThreshold = ProceduralObjectsMod.DynamicRDMinThreshold.value * ProceduralObjectsMod.DynamicRDMinThreshold.value;
                 bool isNightTime = Singleton<SimulationManager>.instance.m_isNightTime;
-                Dictionary<Mesh, List<Matrix4x4>> scratchpad = new Dictionary<Mesh, List<Matrix4x4>>();
-                Dictionary<Mesh, Material> mtlLUT = new Dictionary<Mesh, Material>();
-                for (int i = 0; i < proceduralObjects.Count; i++)
+                ConcurrentDictionary<Mesh, ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, MaterialPropertyBlock>>> equivalentDict 
+                    = new ConcurrentDictionary<Mesh, ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, MaterialPropertyBlock>>>();
+                ConcurrentDictionary<Mesh, Material> equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
+                ConcurrentDictionary<int, Matrix4x4> customDict = new ConcurrentDictionary<int, Matrix4x4>();
+                ConcurrentDictionary<int, Matrix4x4> overlayDict = new ConcurrentDictionary<int, Matrix4x4>();
+
+                int stepSize = 1000;
+                List<Task> calcTasks = new List<Task>();
+
+                void UpdateWorkerFunc(int start, int end)
+                {
+                    //Debug.Log(string.Format("[ProceduralObjects] Task outputing start {0} and end {1}.", start, end));
+                    for (int i = start; i < end; i++)
+                    {
+                        var obj = proceduralObjects[i];
+                        bool infiniteDist = obj.renderDistance >= 16001;
+                        float sqrRd = 0;
+                        if (infiniteDist)
+                        {
+                            obj._insideRenderView = true;
+                        }
+                        else
+                        {
+                            sqrRd = (obj.renderDistance * RenderOptions.instance.globalMultiplier);
+                            sqrRd *= sqrRd;
+                            obj._insideRenderView = obj._squareDistToCam <= sqrRd;
+                        }
+
+                        obj._squareDistToCam = (renderCamera.transform.position - obj.m_position).sqrMagnitude;
+
+                        if (obj._insideRenderView)
+                        {
+                            if (renderCamera.WorldToScreenPoint(obj.m_position).z >= 0)
+                                obj._insideUIview = infiniteDist ? true : (obj._squareDistToCam <= Mathf.Max(sqrRd * 0.7f, sqrDynMinThreshold));
+                            else
+                                obj._insideUIview = false;
+                        }
+                        else
+                        {
+                            obj._insideUIview = false;
+                            continue;
+                        }
+
+                        bool show = obj.layer == null || !obj.layer.m_isHidden;
+                        if (show)
+                        {
+                            try
+                            {
+                                Matrix4x4 m4x4 = Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one);
+                                if (RenderOptions.instance.CanRenderSingle(obj, isNightTime))
+                                {
+                                    // For test only, material differences like custom texts/rects and colors are not yet considered.
+                                    if (obj.meshStatus == 2 || !isGPUSupportInstancing)
+                                    {
+                                        customDict.TryAdd(i, m4x4);
+                                    }
+                                    else if (obj.meshStatus == 1 && isGPUSupportInstancing)
+                                    {
+                                        Tuple<Matrix4x4, ShadowCastingMode, MaterialPropertyBlock> itemTuple =
+                                            new Tuple<Matrix4x4, ShadowCastingMode, MaterialPropertyBlock>(m4x4, obj.disableCastShadows ? ShadowCastingMode.Off : ShadowCastingMode.On, new MaterialPropertyBlock());
+                                        itemTuple.Third.SetColor("_Color", obj.m_color);
+                                        if (equivalentDict.ContainsKey(obj.m_mesh))
+                                        {
+                                            equivalentDict[obj.m_mesh].Enqueue(itemTuple);
+                                        } 
+                                        else
+                                        {
+                                            ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, MaterialPropertyBlock>> newQueue = 
+                                                new ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, MaterialPropertyBlock>>();
+                                            newQueue.Enqueue(itemTuple);
+                                            equivalentDict.TryAdd(obj.m_mesh, newQueue);
+                                        }
+                                        if (!equivalentMtlDict.ContainsKey(obj.m_mesh))
+                                        {
+                                            equivalentMtlDict.TryAdd(obj.m_mesh, obj.m_material);
+                                        }
+                                    }
+                                }
+
+                                if (SingleHoveredObj == obj || (selectedGroup == null ? (obj.group == null ? false : obj.group.root == SingleHoveredObj) : false))
+                                    overlayDict.TryAdd(i, m4x4);
+                            }
+                            catch (Exception e)
+                            {
+                                Debug.LogError("[ProceduralObjects] Error while calculating object " + obj.id.ToString() + " (" + obj.basePrefabName + " of type " + obj.baseInfoType
+                                    + " : " + e.Message + " - Stack Trace : " + e.StackTrace + " Sent to DrawMesh : " + (obj.m_mesh == null).ToString() + "," +
+                                    (obj.m_position).ToString() + "," +
+                                    (obj.m_rotation).ToString() + "," +
+                                    (obj.m_material == null).ToString() + "," +
+                                    (renderCamera == null).ToString());
+                            }
+                        }
+                    }
+
+                }
+
+                for (int i = 0; i < Math.Ceiling(proceduralObjects.Count / (double)stepSize); i++)
+                {
+                    int start = i * stepSize;
+                    int end = (i + 1) * stepSize < proceduralObjects.Count ? (i + 1) * stepSize : proceduralObjects.Count;
+                    Task t = new Task(() =>
+                    {
+                        UpdateWorkerFunc(start, end);
+                    });
+                    calcTasks.Add(t);
+                    t.Start();
+                }
+
+                Task.WaitAll(calcTasks.ToArray());
+
+
+                // Original Version
+                /*for (int i = 0; i < proceduralObjects.Count; i++)
                 {
                     var obj = proceduralObjects[i];
                     bool infiniteDist = obj.renderDistance >= 16001;
@@ -346,29 +463,7 @@ namespace ProceduralObjects
                         {
                             if (RenderOptions.instance.CanRenderSingle(obj, isNightTime))
                             {
-                                // For test only, material differences like custom texts/rects and colors are not yet considered.
-                                if (obj.meshStatus == 2 || !isGPUSupportInstancing)
-                                {
-                                    Graphics.DrawMesh(obj.m_mesh, obj.m_position, obj.m_rotation, obj.m_material, 0, null, 0, null, !obj.disableCastShadows, true);
-                                }
-                                else if (obj.meshStatus == 1 && isGPUSupportInstancing)
-                                {
-                                    // var scale = obj.m_scale != 0 ? new Vector3(obj.m_scale, obj.m_scale, obj.m_scale) : Vector3.one;
-                                    // Debug.Log("[ProceduralObjects] Adding item to scratchpad with scale " + scale.x);
-                                    if (scratchpad.ContainsKey(obj.m_mesh))
-                                    {
-                                        scratchpad[obj.m_mesh].Add(Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one));
-                                    } 
-                                    else
-                                    {
-                                        List<Matrix4x4> matrix4X4s = new List<Matrix4x4>
-                                        {
-                                            Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one)
-                                        };
-                                        scratchpad.Add(obj.m_mesh, matrix4X4s);
-                                        mtlLUT.Add(obj.m_mesh, obj.m_material);
-                                    }
-                                }
+                                Graphics.DrawMesh(obj.m_mesh, obj.m_position, obj.m_rotation, obj.m_material, 0, null, 0, null, !obj.disableCastShadows, true);
                             }
 
                             if (SingleHoveredObj == obj || (selectedGroup == null ? (obj.group == null ? false : obj.group.root == SingleHoveredObj) : false))
@@ -386,55 +481,73 @@ namespace ProceduralObjects
                                 (renderCamera == null).ToString());
                         }
                     }
-                }
-
-                if (scratchpad.Count > 0) 
-                    Debug.Log("[ProceduralObjects] Preparing DrawMeshInstanced with " + scratchpad.Count + " instanced mesh(es).");
-                foreach (var pair in scratchpad)
+                }*/
+                try
                 {
-                    /*if (pair.Value.Count <= 1000)
-                    {
-                        Graphics.DrawMeshInstanced(pair.Key, 0, mtlLUT[pair.Key], pair.Value, null, ShadowCastingMode.On, true, 0);
-                    }
-                    else
-                    {
-                        Shader shader = mtlLUT[pair.Key].shader;
-                        // Get all the local keywords that affect the Shader
-                        var shaderName = shader.name;
-                        Debug.Log(string.Format("[ProceduralObjects] Peeking first item in scratchpad list {0}, item with m4x4s {1}, name of the shader of the material is {2}, with INSTANCING_ON set at {3}.", 
-                            pair.Key.name, pair.Value[0].ToString(), shaderName, mtlLUT[pair.Key].IsKeywordEnabled("INSTANCING_ON")));
 
-
-                        Debug.Log(string.Format("[ProceduralObjects] Item count in scratchpad list {0} is {1}.", pair.Key.name, pair.Value.Count));
-                        int subGroupSize = 1000;
-                        int subGroup = pair.Value.Count / subGroupSize;
-                        for (int i = 0; i < subGroup + 1; i++)
+                    //if (equivalentScratchpad.Count > 0) 
+                    //    Debug.Log("[ProceduralObjects] Preparing DrawMeshInstanced with " + equivalentScratchpad.Count + " instanced mesh(es).");
+                    foreach (var pair in equivalentDict)
+                    {
+                        /*if (pair.Value.Count <= 1000)
                         {
-                            int currGroupSize = pair.Value.Count - i * subGroupSize > 1000 ? 1000 : pair.Value.Count - i * subGroupSize;
-                            Debug.Log(string.Format("[ProceduralObjects] Item count scratchpad list {0} in iteration {1} is {2}, index of the first item in this iteration is {3}.", pair.Key.name, i, currGroupSize, i * subGroupSize));
-                            Matrix4x4[] subMatrix4x4s = new Matrix4x4[currGroupSize];
-                            for (int j = 0; j < currGroupSize; j++)
-                            {
-                                subMatrix4x4s[j] = pair.Value[i * subGroupSize + j];
-                            }
-                            try
-                            {
-                                // Debug.Log(string.Format("[ProceduralObjects] Peeking first item in scratchpad list {0} iteration {1}, item with m4x4s {2}.", pair.Key.name, i, subMatrix4x4s[0].ToString()));
-                                // Mesh tempMesh = Instantiate(pair.Key);
-                                // mtlLUT[pair.Key].enableInstancing = true;
-                                Graphics.DrawMeshInstanced(pair.Key, 0, mtlLUT[pair.Key], subMatrix4x4s, currGroupSize, null, ShadowCastingMode.On, true, 0);
-                            } 
-                            catch (Exception e)
-                            {
-                                Debug.LogError("[ProceduralObjects] Error while rendering mesh " + pair.Key.name + ": " + e.Message + " - Stack Trace : " + e.StackTrace);
-                            }
+                            Graphics.DrawMeshInstanced(pair.Key, 0, mtlLUT[pair.Key], pair.Value, null, ShadowCastingMode.On, true, 0);
                         }
+                        else
+                        {
+                            Shader shader = mtlLUT[pair.Key].shader;
+                            // Get all the local keywords that affect the Shader
+                            var shaderName = shader.name;
+                            Debug.Log(string.Format("[ProceduralObjects] Peeking first item in equivalentScratchpad list {0}, item with m4x4s {1}, name of the shader of the material is {2}, with INSTANCING_ON set at {3}.", 
+                                pair.Key.name, pair.Value[0].ToString(), shaderName, mtlLUT[pair.Key].IsKeywordEnabled("INSTANCING_ON")));
 
-                    }*/
-                    for (int i = 0; i < pair.Value.Count; i++)
-                    {
-                        Graphics.DrawMesh(pair.Key, pair.Value[i], mtlLUT[pair.Key], 0, null, 0, null, true, true);
+
+                            Debug.Log(string.Format("[ProceduralObjects] Item count in equivalentScratchpad list {0} is {1}.", pair.Key.name, pair.Value.Count));
+                            int subGroupSize = 1000;
+                            int subGroup = pair.Value.Count / subGroupSize;
+                            for (int i = 0; i < subGroup + 1; i++)
+                            {
+                                int currGroupSize = pair.Value.Count - i * subGroupSize > 1000 ? 1000 : pair.Value.Count - i * subGroupSize;
+                                Debug.Log(string.Format("[ProceduralObjects] Item count equivalentScratchpad list {0} in iteration {1} is {2}, index of the first item in this iteration is {3}.", pair.Key.name, i, currGroupSize, i * subGroupSize));
+                                Matrix4x4[] subMatrix4x4s = new Matrix4x4[currGroupSize];
+                                for (int j = 0; j < currGroupSize; j++)
+                                {
+                                    subMatrix4x4s[j] = pair.Value[i * subGroupSize + j];
+                                }
+                                try
+                                {
+                                    //Debug.Log(string.Format("[ProceduralObjects] Peeking first item in equivalentScratchpad list {0} iteration {1}, item with m4x4s {2}.", pair.Key.name, i, subMatrix4x4s[0].ToString()));
+                                    Graphics.DrawMeshInstanced(pair.Key, 0, mtlLUT[pair.Key], subMatrix4x4s, currGroupSize, null, ShadowCastingMode.On, true, 0);
+                                } 
+                                catch (Exception e)
+                                {
+                                    Debug.LogError("[ProceduralObjects] Error while rendering mesh " + pair.Key.name + ": " + e.Message + " - Stack Trace : " + e.StackTrace);
+                                }
+                            }
+
+                        }*/
+                        Tuple<Matrix4x4, ShadowCastingMode, MaterialPropertyBlock> currTuple = null;
+                        while (pair.Value.TryDequeue(out currTuple))
+                        {
+                            Graphics.DrawMesh(pair.Key, currTuple.First, equivalentMtlDict[pair.Key], 0, renderCamera, 0, currTuple.Third, currTuple.Second, true);
+                        }
                     }
+
+                    foreach (var pair in customDict)
+                    {
+                        Graphics.DrawMesh(proceduralObjects[pair.Key].m_mesh, pair.Value, proceduralObjects[pair.Key].m_material, 0);
+                    }
+
+                    foreach (var pair in overlayDict)
+                    {
+                        Graphics.DrawMesh(proceduralObjects[pair.Key].overlayRenderMesh, pair.Value,
+                            selectedGroup == null ? (SingleHoveredObj.isRootOfGroup ? redOverlayMat : purpleOverlayMat) : purpleOverlayMat,
+                            0, null, 0, null, false, false);
+                    }
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError("[ProceduralObjects] Error while rendering objects " + e.Message + " - Stack Trace : " + e.StackTrace);
                 }
 
                 if (moduleManager.enabledModules.Count > 0)
@@ -885,7 +998,7 @@ namespace ProceduralObjects
                                 Gizmos.CreateScaleGizmo(currentlyEditingObject.m_position, true);
                             }
                         }
-                        #region Gizmo movement - WHOLE MODEL
+#region Gizmo movement - WHOLE MODEL
                         if (axisState != AxisEditionState.none)
                         {
                             if (Input.GetMouseButton(0))
@@ -1169,7 +1282,7 @@ namespace ProceduralObjects
                         {
                             Gizmos.Update(actionMode, Vector3.Distance(renderCamera.transform.position, currentlyEditingObject.m_position), currentlyEditingObject.m_position, currentlyEditingObject.m_rotation, renderCamera);
                         }
-                        #endregion
+#endregion
                     }
                     else // vertex customization
                     {
@@ -1307,10 +1420,10 @@ namespace ProceduralObjects
                         // SMOOTH
                         if (!KeyBindingsManager.instance.GetBindingFromName("edition_smallMovements").GetBinding())
                         {
-                            #region deplacement SMOOTH + VITE
+#region deplacement SMOOTH + VITE
                             if (editingVertex)
                             {
-                                #region déplacement des vertex
+#region déplacement des vertex
                                 if (KeyBindingsManager.instance.GetBindingFromName("position_moveUp").GetBinding())
                                 {
                                     currentlyEditingObject.historyEditionBuffer.InitializeNewStep(EditingStep.StepType.vertices, currentlyEditingObject.vertices);
@@ -1353,11 +1466,11 @@ namespace ProceduralObjects
                                         currentlyEditingObject.vertices[v.Index].Position.x -= 5f * TimeUtils.deltaTime;
                                     Apply();
                                 }
-                                #endregion
+#endregion
                             }
                             else if (editingWholeModel && axisState == AxisEditionState.none)
                             {
-                                #region déplacement du modèle
+#region déplacement du modèle
                                 switch (actionMode)
                                 {
                                     case 0:
@@ -1467,16 +1580,16 @@ namespace ProceduralObjects
                                         }
                                         break;
                                 }
-                                #endregion
+#endregion
                             }
-                            #endregion
+#endregion
                         }
                         else
                         {
-                            #region deplacement SMOOTH + LENT
+#region deplacement SMOOTH + LENT
                             if (editingVertex)
                             {
-                                #region déplacement des vertex
+#region déplacement des vertex
                                 if (KeyBindingsManager.instance.GetBindingFromName("position_moveUp").GetBinding())
                                 {
                                     currentlyEditingObject.historyEditionBuffer.InitializeNewStep(EditingStep.StepType.vertices, currentlyEditingObject.vertices);
@@ -1519,11 +1632,11 @@ namespace ProceduralObjects
                                         currentlyEditingObject.vertices[v.Index].Position.x -= TimeUtils.deltaTime;
                                     Apply();
                                 }
-                                #endregion
+#endregion
                             }
                             else if (editingWholeModel && axisState == AxisEditionState.none)
                             {
-                                #region déplacement du modèle
+#region déplacement du modèle
                                 switch (actionMode)
                                 {
                                     case 0:
@@ -1633,13 +1746,13 @@ namespace ProceduralObjects
                                         }
                                         break;
                                 }
-                                #endregion
+#endregion
                             }
-                            #endregion
+#endregion
                         }
                         if (editingVertex)
                         {
-                            #region confirm edition steps
+#region confirm edition steps
                             if (KeyBindingsManager.instance.GetBindingFromName("position_moveUp").GetBindingUp())
                             {
                                 currentlyEditingObject.historyEditionBuffer.ConfirmNewStep(currentlyEditingObject.vertices);
@@ -1664,7 +1777,7 @@ namespace ProceduralObjects
                             {
                                 currentlyEditingObject.historyEditionBuffer.ConfirmNewStep(currentlyEditingObject.vertices);
                             }
-                            #endregion
+#endregion
                         }
                     }
                     else
@@ -1672,10 +1785,10 @@ namespace ProceduralObjects
                         // SACADE
                         if (!KeyBindingsManager.instance.GetBindingFromName("edition_smallMovements").GetBinding())
                         {
-                            #region deplacement SACADE + VITE
+#region deplacement SACADE + VITE
                             if (editingVertex)
                             {
-                                #region déplacement des vertex
+#region déplacement des vertex
                                 if (KeyBindingsManager.instance.GetBindingFromName("position_moveUp").GetBindingDown())
                                 {
                                     currentlyEditingObject.historyEditionBuffer.InitializeNewStep(EditingStep.StepType.vertices, currentlyEditingObject.vertices);
@@ -1730,11 +1843,11 @@ namespace ProceduralObjects
                                         currentlyEditingObject.historyEditionBuffer.ConfirmNewStep(currentlyEditingObject.vertices);
                                     Apply();
                                 }
-                                #endregion
+#endregion
                             }
                             else if (editingWholeModel && axisState == AxisEditionState.none)
                             {
-                                #region déplacement du modèle
+#region déplacement du modèle
                                 switch (actionMode)
                                 {
                                     case 0:
@@ -1843,16 +1956,16 @@ namespace ProceduralObjects
                                         }
                                         break;
                                 }
-                                #endregion
+#endregion
                             }
-                            #endregion
+#endregion
                         }
                         else
                         {
-                            #region deplacement SACADE + LENT
+#region deplacement SACADE + LENT
                             if (editingVertex)
                             {
-                                #region déplacement des vertex
+#region déplacement des vertex
                                 if (KeyBindingsManager.instance.GetBindingFromName("position_moveUp").GetBindingDown())
                                 {
                                     currentlyEditingObject.historyEditionBuffer.InitializeNewStep(EditingStep.StepType.vertices, currentlyEditingObject.vertices);
@@ -1907,11 +2020,11 @@ namespace ProceduralObjects
                                         currentlyEditingObject.historyEditionBuffer.ConfirmNewStep(currentlyEditingObject.vertices);
                                     Apply();
                                 }
-                                #endregion
+#endregion
                             }
                             else if (editingWholeModel && axisState == AxisEditionState.none)
                             {
-                                #region déplacement du modèle
+#region déplacement du modèle
                                 switch (actionMode)
                                 {
                                     case 0:
@@ -2021,9 +2134,9 @@ namespace ProceduralObjects
                                         }
                                         break;
                                 }
-                                #endregion
+#endregion
                             }
-                            #endregion
+#endregion
                         }
                     }
                 }
@@ -2097,7 +2210,7 @@ namespace ProceduralObjects
                                 {
                                     if (pObjSelection.Count == 1)
                                     {
-                                        #region
+#region
                                         bool isRoot = obj.group != null && obj.isRootOfGroup;
                                         float addedHeight = 0;
                                         if (isRoot && selectedGroup == null)
@@ -2287,11 +2400,11 @@ namespace ProceduralObjects
                                             GUI.color = Color.white;
                                             GUI.EndScrollView();
                                         }
-                                        #endregion
+#endregion
                                     }
                                     else
                                     {
-                                        #region
+#region
                                         bool isRoot = obj.group != null && obj.isRootOfGroup;
                                         float addedHeight = 0;
                                         if (selectedGroup == null)
@@ -2421,7 +2534,7 @@ namespace ProceduralObjects
                                             }
                                             GUI.EndScrollView();
                                         }
-                                        #endregion
+#endregion
                                     }
                                 }
                                 else
@@ -2519,7 +2632,7 @@ namespace ProceduralObjects
                         advEdManager.DrawWindow();
                     }
 
-                    #region GUI when TOOL is active
+#region GUI when TOOL is active
                     if (currentlyEditingObject != null)
                     {
                         if (!editingWholeModel)
@@ -2668,7 +2781,7 @@ namespace ProceduralObjects
                                 }
                             }
                         }
-                    #endregion
+#endregion
                     }
                 }
                 else // if Move To Tool
@@ -2696,7 +2809,7 @@ namespace ProceduralObjects
 
         public void DrawUIWindow(int id)
         {
-            #region setup window
+#region setup window
             GUI.DragWindow(new Rect(0, 0, 348, 30));
             string help = "Main_Page";
             if (proceduralTool && currentlyEditingObject != null)
@@ -2709,7 +2822,7 @@ namespace ProceduralObjects
             if (GUIUtils.CloseHelpButtons(window, help))
                 ClosePO();
 
-            #endregion
+#endregion
 
 
             if (proceduralTool && !reselectingTex)
@@ -4188,6 +4301,29 @@ namespace ProceduralObjects
              }
              return dictionary;
          } */
+
+        public class Tuple<T1, T2, T3>
+        {
+            public T1 First { get; private set; }
+            public T2 Second { get; private set; }
+            public T3 Third { get; private set; }
+            internal Tuple(T1 first, T2 second, T3 third)
+            {
+                First = first;
+                Second = second;
+                Third = third;
+            }
+        }
+
+        public static class Tuple
+        {
+            public static Tuple<T1, T2, T3> New<T1, T2, T3>(T1 first, T2 second, T3 third)
+            {
+                var tuple = new Tuple<T1, T2, T3>(first, second, third);
+                return tuple;
+            }
+        }
+
     }
     public enum AxisEditionState
     {
