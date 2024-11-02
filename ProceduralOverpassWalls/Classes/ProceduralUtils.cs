@@ -210,6 +210,8 @@ namespace ProceduralObjects.Classes
             PropInfo[] props = Resources.FindObjectsOfTypeAll<PropInfo>();
             BuildingInfo[] buildings = Resources.FindObjectsOfTypeAll<BuildingInfo>();
 
+            Debug.Log(string.Format("[ProceduralObjects] LoadContainerData, PropInfo props' size is {0}, BuildingInfo buildings' size is {1}", props.Length, buildings.Length));
+
             foreach (var c in containerArray)
             {
                 try
@@ -604,6 +606,63 @@ namespace ProceduralObjects.Classes
                 tw.WriteLine("<tr><td>" + req.Value + "</td><td style=\"text-align:center;\"><input type=button onClick=\"parent.open('https://steamcommunity.com/sharedfiles/filedetails/?id="
                     + req.Key.ToString() + "')\" value='Show on the workshop'></td></tr>");
             tw.Close();
+        }
+
+        public static void InitMeshAndVertices(ProceduralObjectContainer container, string sourceMaterialName, Mesh sourceMesh, ProceduralObject target) 
+        {
+            if (container.meshStatus == 0 && container.vertices != null)
+            {
+                // CHECK FOR MESH REPETITION
+                if (CheckMeshEquivalence(container.vertices, sourceMesh.vertices))
+                {
+                    target.meshStatus = 1;
+                    target.m_mesh = sourceMesh;
+                    target.vertices = Vertex.CreateVertexList(sourceMesh.vertices, sourceMaterialName);
+                }
+                else
+                {
+                    target.meshStatus = 2;
+                    target.m_mesh = sourceMesh.InstantiateMesh();
+                    var vert = SerializableVector3.ToStandardVector3Array(container.vertices);
+                    if (container.scale != 0)
+                    {
+                        for (int i = 0; i < vert.Count(); i++)
+                        {
+                            vert[i] = new Vector3(vert[i].x * container.scale, vert[i].y * container.scale, vert[i].z * container.scale);
+                        }
+                    }
+                    target.m_mesh.SetVertices(new List<Vector3>(vert));
+                    target.vertices = Vertex.CreateVertexList(target);
+                }
+            }
+            else if (container.meshStatus == 1)
+            {
+                target.meshStatus = 1;
+                target.m_mesh = sourceMesh;
+                target.vertices = Vertex.CreateVertexList(sourceMesh.vertices, sourceMaterialName);
+            }
+            else // meshstatus2
+            {
+                target.meshStatus = 2;
+                target.m_mesh = sourceMesh.InstantiateMesh();
+                if (container.serializedMeshData != null)
+                    container.serializedMeshData.ApplyDataToObject(target);
+                else if (container.vertices != null)
+                {
+                    var vert = SerializableVector3.ToStandardVector3Array(container.vertices);
+                    if (container.scale != 0)
+                    {
+                        for (int i = 0; i < vert.Count(); i++)
+                        {
+                            vert[i] = new Vector3(vert[i].x * container.scale, vert[i].y * container.scale, vert[i].z * container.scale);
+                        }
+                    }
+                    target.m_mesh.SetVertices(new List<Vector3>(vert));
+                }
+                else
+                    throw new Exception("[ProceduralObjects] Loading failure : Missing mesh data !");
+                target.vertices = Vertex.CreateVertexList(target);
+            }
         }
     }
 }

@@ -86,6 +86,7 @@ namespace ProceduralObjects
                     arrays.Add(serializableDataManager.LoadData(dataKey + i.ToString()));
             }
             Debug.Log("[ProceduralObjects] Data loading : found " + arrays.Count.ToString() + " splited data arrays.");
+            var startTime = DateTime.Now;
             long length = 0;
             for (int i = 0; i < arrays.Count; i++)
                 length += arrays[i].Length;
@@ -96,10 +97,16 @@ namespace ProceduralObjects
                 Array.Copy(arrays[i], 0, byteProceduralObjectsArray, currentLength, arrays[i].Length);
                 currentLength += arrays[i].Length;
             }
+            var byteArrayCopyTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
+            Debug.Log("[ProceduralObjects] byteProceduralObjectsArray finished in " + byteArrayCopyTime + " seconds");
+
             if (byteProceduralObjectsArray.Length > 0)
             {
                 MemoryStream proceduralObjStream = new MemoryStream();
                 proceduralObjStream.Write(byteProceduralObjectsArray, 0, byteProceduralObjectsArray.Length);
+                var memStreamWriteTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
+                Debug.Log("[ProceduralObjects] memStreamWriteTime finished in " + (memStreamWriteTime - byteArrayCopyTime) + " seconds");
+
                 proceduralObjStream.Position = 0;
                 try
                 {
@@ -108,6 +115,9 @@ namespace ProceduralObjects
                     {
                         ProceduralObjectsMod.tempContainerData = data;
                         Debug.Log("[ProceduralObjects] Data Loading : transfered " + data.Count() + " ProceduralObjectContainer instances to ProceduralObjectsLogic.");
+
+                        var memStreamDeserializeTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
+                        Debug.Log("[ProceduralObjects] memStreamDeserializeTime finished in " + (memStreamDeserializeTime - memStreamWriteTime) + " seconds");
                     }
                     else
                         Debug.LogWarning("[ProceduralObjects] No procedural object found while loading the map.");
@@ -126,6 +136,10 @@ namespace ProceduralObjects
             {
                 Debug.Log("[ProceduralObjects] No objects data was found to load!");
             }
+
+            var byteObjectDeserializeTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
+            Debug.Log("[ProceduralObjects] byteObjectDeserialize finished in " + (byteObjectDeserializeTime - byteArrayCopyTime) + " seconds");
+
             byte[] layerData = serializableDataManager.LoadData(layerKey);
             if (layerData != null)
             {
@@ -152,6 +166,10 @@ namespace ProceduralObjects
                     layerStream.Close();
                 }
             }
+
+            var layerLoadTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
+            Debug.Log("[ProceduralObjects] layerLoad finished in " + (layerLoadTime - byteObjectDeserializeTime) + " seconds");
+
             Debug.Log("[ProceduralObjects] Data loading ended.");
         }
 

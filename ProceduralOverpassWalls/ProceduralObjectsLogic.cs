@@ -94,6 +94,8 @@ namespace ProceduralObjects
 
         private static AudioClip[] audiosClips;
 
+        private bool isGPUSupportInstancing = false;
+
         void Start()
         {
             Debug.Log("[ProceduralObjects] v" + ProceduralObjectsMod.VERSION + " - Game start procedure started.");
@@ -151,6 +153,8 @@ namespace ProceduralObjects
             moduleManager = new ModuleManager(this);
             measurementsManager = new MeasurementsManager(this);
             filters = new SelectionFilters();
+
+            var layerAndContainerLoadStartTime = DateTime.Now;
             if (ProceduralObjectsMod.tempLayerData != null)
             {
                 layerManager.m_layers = ProceduralObjectsMod.tempLayerData.ToList();
@@ -168,6 +172,9 @@ namespace ProceduralObjects
                 groups = new List<POGroup>();
                 activeIds = new HashSet<int>();
             }
+            double layerAndContainerLoadingTime = Math.Round((DateTime.Now - layerAndContainerLoadStartTime).TotalSeconds, 2);
+            Debug.Log("[ProceduralObjects] Layers and PO data loaded in " + layerAndContainerLoadingTime + " seconds");
+
             new POStatisticsManager(this);
             ProceduralTool.CreateCursors();
             // CT default actions
@@ -185,6 +192,25 @@ namespace ProceduralObjects
             redLabelStyle.normal.textColor = Color.red;
             editingVertexIndex = new List<int>();
             LocaleManager.eventLocaleChanged += SelectSetupLocalization;
+
+            // Tests for DrawMeshInstanced on props with meshStatus==1
+            isGPUSupportInstancing = SystemInfo.supportsInstancing;
+            if (isGPUSupportInstancing && proceduralObjects != null)
+            {
+                string instancingKeyword = "INSTANCING_ON";
+                for (int i = 0; i < proceduralObjects.Count; i++)
+                {
+                    if (proceduralObjects[i].meshStatus == 1 && !proceduralObjects[i].m_material.IsKeywordEnabled(instancingKeyword))
+                    {
+                        proceduralObjects[i].m_material.EnableKeyword(instancingKeyword);
+                        Debug.Log(string.Format("[ProceduralObjects] Modifing {0}, {1}, {2} properties of shader {3} to {4}, {5}, {6}",
+                            instancingKeyword, "", "", 
+                            proceduralObjects[i].m_material.shader.name, 
+                            proceduralObjects[i].m_material.IsKeywordEnabled(instancingKeyword), proceduralObjects[i].m_material.IsKeywordEnabled(instancingKeyword), proceduralObjects[i].m_material.IsKeywordEnabled(instancingKeyword)));
+                    }
+                }
+            }
+
             loadingTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
             Debug.Log("[ProceduralObjects] Game start procedure ended in " + loadingTime + " seconds");
         }
@@ -278,6 +304,8 @@ namespace ProceduralObjects
             {
                 var sqrDynMinThreshold = ProceduralObjectsMod.DynamicRDMinThreshold.value * ProceduralObjectsMod.DynamicRDMinThreshold.value;
                 bool isNightTime = Singleton<SimulationManager>.instance.m_isNightTime;
+                Dictionary<Mesh, List<Matrix4x4>> scratchpad = new Dictionary<Mesh, List<Matrix4x4>>();
+                Dictionary<Mesh, Material> mtlLUT = new Dictionary<Mesh, Material>();
                 for (int i = 0; i < proceduralObjects.Count; i++)
                 {
                     var obj = proceduralObjects[i];
@@ -317,7 +345,31 @@ namespace ProceduralObjects
                         try
                         {
                             if (RenderOptions.instance.CanRenderSingle(obj, isNightTime))
-                                Graphics.DrawMesh(obj.m_mesh, obj.m_position, obj.m_rotation, obj.m_material, 0, null, 0, null, !obj.disableCastShadows, true);
+                            {
+                                // For test only, material differences like custom texts/rects and colors are not yet considered.
+                                if (obj.meshStatus == 2 || !isGPUSupportInstancing)
+                                {
+                                    Graphics.DrawMesh(obj.m_mesh, obj.m_position, obj.m_rotation, obj.m_material, 0, null, 0, null, !obj.disableCastShadows, true);
+                                }
+                                else if (obj.meshStatus == 1 && isGPUSupportInstancing)
+                                {
+                                    // var scale = obj.m_scale != 0 ? new Vector3(obj.m_scale, obj.m_scale, obj.m_scale) : Vector3.one;
+                                    // Debug.Log("[ProceduralObjects] Adding item to scratchpad with scale " + scale.x);
+                                    if (scratchpad.ContainsKey(obj.m_mesh))
+                                    {
+                                        scratchpad[obj.m_mesh].Add(Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one));
+                                    } 
+                                    else
+                                    {
+                                        List<Matrix4x4> matrix4X4s = new List<Matrix4x4>
+                                        {
+                                            Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one)
+                                        };
+                                        scratchpad.Add(obj.m_mesh, matrix4X4s);
+                                        mtlLUT.Add(obj.m_mesh, obj.m_material);
+                                    }
+                                }
+                            }
 
                             if (SingleHoveredObj == obj || (selectedGroup == null ? (obj.group == null ? false : obj.group.root == SingleHoveredObj) : false))
                                 Graphics.DrawMesh(obj.overlayRenderMesh, obj.m_position, obj.m_rotation, 
@@ -333,6 +385,55 @@ namespace ProceduralObjects
                                 (obj.m_material == null).ToString() + "," +
                                 (renderCamera == null).ToString());
                         }
+                    }
+                }
+
+                if (scratchpad.Count > 0) 
+                    Debug.Log("[ProceduralObjects] Preparing DrawMeshInstanced with " + scratchpad.Count + " instanced mesh(es).");
+                foreach (var pair in scratchpad)
+                {
+                    /*if (pair.Value.Count <= 1000)
+                    {
+                        Graphics.DrawMeshInstanced(pair.Key, 0, mtlLUT[pair.Key], pair.Value, null, ShadowCastingMode.On, true, 0);
+                    }
+                    else
+                    {
+                        Shader shader = mtlLUT[pair.Key].shader;
+                        // Get all the local keywords that affect the Shader
+                        var shaderName = shader.name;
+                        Debug.Log(string.Format("[ProceduralObjects] Peeking first item in scratchpad list {0}, item with m4x4s {1}, name of the shader of the material is {2}, with INSTANCING_ON set at {3}.", 
+                            pair.Key.name, pair.Value[0].ToString(), shaderName, mtlLUT[pair.Key].IsKeywordEnabled("INSTANCING_ON")));
+
+
+                        Debug.Log(string.Format("[ProceduralObjects] Item count in scratchpad list {0} is {1}.", pair.Key.name, pair.Value.Count));
+                        int subGroupSize = 1000;
+                        int subGroup = pair.Value.Count / subGroupSize;
+                        for (int i = 0; i < subGroup + 1; i++)
+                        {
+                            int currGroupSize = pair.Value.Count - i * subGroupSize > 1000 ? 1000 : pair.Value.Count - i * subGroupSize;
+                            Debug.Log(string.Format("[ProceduralObjects] Item count scratchpad list {0} in iteration {1} is {2}, index of the first item in this iteration is {3}.", pair.Key.name, i, currGroupSize, i * subGroupSize));
+                            Matrix4x4[] subMatrix4x4s = new Matrix4x4[currGroupSize];
+                            for (int j = 0; j < currGroupSize; j++)
+                            {
+                                subMatrix4x4s[j] = pair.Value[i * subGroupSize + j];
+                            }
+                            try
+                            {
+                                // Debug.Log(string.Format("[ProceduralObjects] Peeking first item in scratchpad list {0} iteration {1}, item with m4x4s {2}.", pair.Key.name, i, subMatrix4x4s[0].ToString()));
+                                // Mesh tempMesh = Instantiate(pair.Key);
+                                // mtlLUT[pair.Key].enableInstancing = true;
+                                Graphics.DrawMeshInstanced(pair.Key, 0, mtlLUT[pair.Key], subMatrix4x4s, currGroupSize, null, ShadowCastingMode.On, true, 0);
+                            } 
+                            catch (Exception e)
+                            {
+                                Debug.LogError("[ProceduralObjects] Error while rendering mesh " + pair.Key.name + ": " + e.Message + " - Stack Trace : " + e.StackTrace);
+                            }
+                        }
+
+                    }*/
+                    for (int i = 0; i < pair.Value.Count; i++)
+                    {
+                        Graphics.DrawMesh(pair.Key, pair.Value[i], mtlLUT[pair.Key], 0, null, 0, null, true, true);
                     }
                 }
 

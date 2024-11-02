@@ -31,7 +31,14 @@ namespace ProceduralObjects.Classes
                 this.isPloppableAsphalt = sourceProp.IsPloppableAsphalt();
                 m_position = container.position.ToVector3();
                 m_rotation = container.rotation.ToQuaternion();
-                m_material = GameObject.Instantiate(sourceProp.m_material); // overkil ??
+                // m_material = GameObject.Instantiate(sourceProp.m_material); // overkil ??
+
+                // Test version 241031 for draw mesh instancing tests
+                m_material = new Material(sourceProp.m_material); // Test version
+                m_material.enableInstancing = true;
+                // Dictionary<Mesh, SerializableVector3[]> dict = new Dictionary<Mesh, SerializableVector3[]>();
+                // Tests end
+
                 if (container.meshStatus == 0 && container.vertices != null)
                 {
                     // CHECK FOR MESH REPETITION
@@ -85,6 +92,8 @@ namespace ProceduralObjects.Classes
                         throw new Exception("[ProceduralObjects] Loading failure : Missing mesh data !");
                     vertices = Vertex.CreateVertexList(this);
                 }
+
+
                 if (sourceProp.m_mesh.name == "ploppableasphalt-prop" || sourceProp.m_mesh.name == "ploppableasphalt-decal")
                     m_color = m_material.ApplyPloppableColor();
                 if (container.hasCustomTexture && TextureManager.instance != null)
@@ -104,8 +113,75 @@ namespace ProceduralObjects.Classes
                 this.isPloppableAsphalt = false;
                 m_position = container.position.ToVector3();
                 m_rotation = container.rotation.ToQuaternion();
+                // m_material = GameObject.Instantiate(sourceProp.m_material); // overkill ??
+
+                // Test version 241031
+                m_material = new Material(sourceProp.m_material); // Test version
+                m_material.enableInstancing = true;  // Test version
+
+                /*
+                if (container.meshStatus == 0 && container.vertices != null)
+                {
+                    // CHECK FOR MESH REPETITION
+                    if (ProceduralUtils.CheckMeshEquivalence(container.vertices, sourceProp.m_mesh.vertices))
+                    {
+                        meshStatus = 1;
+                        m_mesh = sourceProp.m_mesh;
+                        vertices = Vertex.CreateVertexList(sourceProp);
+                    }
+                    else
+                    {
+                        meshStatus = 2;
+                        m_mesh = sourceProp.m_mesh.InstantiateMesh();
+                        var vert = SerializableVector3.ToStandardVector3Array(container.vertices);
+                        if (container.scale != 0)
+                        {
+                            for (int i = 0; i < vert.Count(); i++)
+                            {
+                                vert[i] = new Vector3(vert[i].x * container.scale, vert[i].y * container.scale, vert[i].z * container.scale);
+                            }
+                        }
+                        m_mesh.SetVertices(new List<Vector3>(vert));
+                        vertices = Vertex.CreateVertexList(this);
+                    }
+                }
+                else if (container.meshStatus == 1)
+                {
+                    meshStatus = 1;
+                    m_mesh = sourceProp.m_mesh;
+                    vertices = Vertex.CreateVertexList(sourceProp);
+                }
+                else // meshstatus2
+                {
+                    meshStatus = 2;
+                    m_mesh = sourceProp.m_mesh.InstantiateMesh();
+                    if (container.serializedMeshData != null)
+                        container.serializedMeshData.ApplyDataToObject(this);
+                    else if (container.vertices != null)
+                    {
+                        var vert = SerializableVector3.ToStandardVector3Array(container.vertices);
+                        if (container.scale != 0)
+                        {
+                            for (int i = 0; i < vert.Count(); i++)
+                            {
+                                vert[i] = new Vector3(vert[i].x * container.scale, vert[i].y * container.scale, vert[i].z * container.scale);
+                            }
+                        }
+                        m_mesh.SetVertices(new List<Vector3>(vert));
+                    }
+                    else
+                        throw new Exception("[ProceduralObjects] Loading failure : Missing mesh data !");
+                    vertices = Vertex.CreateVertexList(this);
+                }
+                */
+
+                ProceduralUtils.InitMeshAndVertices(container, sourceProp.m_material.name, sourceProp.m_mesh, this);
+
+                // Tests end
+
+                /*
                 meshStatus = 2;
-                m_material = GameObject.Instantiate(sourceProp.m_material); // overkill ??
+
                 m_mesh = sourceProp.m_mesh.InstantiateMesh();
                 if (container.serializedMeshData != null)
                     container.serializedMeshData.ApplyDataToObject(this);
@@ -123,7 +199,8 @@ namespace ProceduralObjects.Classes
                 }
                 else
                     throw new Exception("[ProceduralObjects] Loading failure : Missing mesh data !");
-                vertices = Vertex.CreateVertexList(this);
+                vertices = Vertex.CreateVertexList(this); */
+
                 m_mesh.colors = new Color[] { };
                 m_mesh.colors32 = new Color32[] { };
 
