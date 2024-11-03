@@ -106,8 +106,11 @@ namespace ProceduralObjects
         private ConcurrentDictionary<int, Matrix4x4> customDict = new ConcurrentDictionary<int, Matrix4x4>();
         private ConcurrentDictionary<int, Matrix4x4> overlayDict = new ConcurrentDictionary<int, Matrix4x4>();
         private MaterialPropertyBlock propertyBlock;
-        private Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]> equivalentDictCache;
-
+        //private Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]> equivalentDictCache;
+        private Dictionary<Mesh, Matrix4x4[]> equivalentTRSDictCache;
+        private Dictionary<Mesh, ShadowCastingMode[]> equivalentShadowCastingDictCache;
+        private Dictionary<Mesh, Color[]> equivalentColorDictCache;
+ 
         void Start()
         {
             Debug.Log("[ProceduralObjects] v" + ProceduralObjectsMod.VERSION + " - Game start procedure started.");
@@ -208,12 +211,17 @@ namespace ProceduralObjects
             // Tests for DrawMeshInstanced on props with meshStatus==1
             isGPUSupportInstancing = SystemInfo.supportsInstancing; 
             equivalentDict = new ConcurrentDictionary<Mesh, ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, Color>>>();
-            equivalentDictCache = new Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]>();
+            //equivalentDictCache = new Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]>();
             equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
             customDict = new ConcurrentDictionary<int, Matrix4x4>();
             overlayDict = new ConcurrentDictionary<int, Matrix4x4>();
             propertyBlock = new MaterialPropertyBlock();
             propertyBlock.SetColor("_Color", Color.white);
+
+
+            equivalentTRSDictCache = new Dictionary<Mesh, Matrix4x4[]>();
+            equivalentShadowCastingDictCache = new Dictionary<Mesh, ShadowCastingMode[]>();
+            equivalentColorDictCache = new Dictionary<Mesh, Color[]>();
 
             if (isGPUSupportInstancing && proceduralObjects != null)
             {
@@ -387,7 +395,7 @@ namespace ProceduralObjects
                                     // For test only, material differences like custom texts/rects are not yet considered.
                                     if (obj.meshStatus == 2 || !isGPUSupportInstancing)
                                     {
-                                        customDict.TryAdd(i, m4x4);
+                                        customDict.AddOrUpdate(i, m4x4, (key, oldMatrix4x4) => m4x4);
                                     }
                                     else if (obj.meshStatus == 1 && isGPUSupportInstancing)
                                     {
@@ -403,11 +411,14 @@ namespace ProceduralObjects
                                             ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, Color>> newQueue =
                                                 new ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, Color>>();
                                             newQueue.Enqueue(itemTuple);
-                                            equivalentDict.TryAdd(obj.m_mesh, newQueue);
+                                            equivalentDict.AddOrUpdate(obj.m_mesh, newQueue, (key, oldQueue) => { 
+                                                oldQueue.Enqueue(itemTuple); 
+                                                return oldQueue; 
+                                            });
                                         }
                                         if (!equivalentMtlDict.ContainsKey(obj.m_mesh))
                                         {
-                                            equivalentMtlDict.TryAdd(obj.m_mesh, obj.m_material);
+                                            equivalentMtlDict.AddOrUpdate(obj.m_mesh, obj.m_material, (key, oldMaterial) => obj.m_material);
                                         }
                                     }
                                 }
@@ -428,8 +439,9 @@ namespace ProceduralObjects
                     }
 
                 }
-
-                for (int i = 0; i < Math.Ceiling(proceduralObjects.Count / (double)stepSize); i++)
+                int partitionCount = (int)Math.Ceiling(proceduralObjects.Count / (double)stepSize);
+                List<int> slots = new List<int>();
+                for (int i = 0; i < partitionCount; i++)
                 {
                     int start = i * stepSize;
                     int end = (i + 1) * stepSize < proceduralObjects.Count ? (i + 1) * stepSize : proceduralObjects.Count;
@@ -439,14 +451,47 @@ namespace ProceduralObjects
                     });
                     calcTasks.Add(t);
                     t.Start();
+
+                    //slots.Add(i);
                 }
 
+                //Parallel.ForEach(slots, i => { UpdateWorkerFunc(i * stepSize, (i + 1) * stepSize < proceduralObjects.Count ? (i + 1) * stepSize : proceduralObjects.Count); });
+                
                 Task.WaitAll(calcTasks.ToArray());
+                
 
-                equivalentDictCache.Clear();
+                //equivalentDictCache.Clear();
+                equivalentTRSDictCache.Clear();
+                equivalentShadowCastingDictCache.Clear();
+                equivalentColorDictCache.Clear();
+
+                Tuple<Matrix4x4, ShadowCastingMode, Color> currItem = null;
                 foreach (var pair in equivalentDict)
                 {
-                    equivalentDictCache.Add(pair.Key, pair.Value.ToArray());
+                    //equivalentDictCache.Add(pair.Key, pair.Value.ToArray());
+
+                    int size = pair.Value.Count;
+                    Matrix4x4[] matrix4X4s = new Matrix4x4[size];
+                    ShadowCastingMode[] shadowCastings = new ShadowCastingMode[size];
+                    Color[] colors = new Color[size];
+                    int i = 0;
+                    while (pair.Value.TryDequeue(out currItem) && i < size)
+                    {
+                        matrix4X4s[i] = currItem.First;
+                        shadowCastings[i] = currItem.Second;
+                        colors[i] = currItem.Third;
+                        i++;
+                    }
+                    if (matrix4X4s.Length != shadowCastings.Length || matrix4X4s.Length != colors.Length || shadowCastings.Length != colors.Length)
+                    {
+                        Debug.LogError(string.Format("[ProceduralObjects] Error while packing render data for mesh {0}.", pair.Key.name));
+                    }
+                    else
+                    {
+                        equivalentTRSDictCache.Add(pair.Key, matrix4X4s);
+                        equivalentShadowCastingDictCache.Add(pair.Key, shadowCastings);
+                        equivalentColorDictCache.Add(pair.Key, colors);
+                    }
                 }
                 startRenderTime = DateTime.Now;
 
@@ -521,11 +566,11 @@ namespace ProceduralObjects
                     {
                         Debug.Log("[ProceduralObjects] Preparing DrawMeshInstanced with " + equivalentScratchpad.Count + " instanced mesh(es).");
                     }*/
-                    if (equivalentDictCache.Count == 0)
+                    if (equivalentTRSDictCache != null && equivalentTRSDictCache.Count == 0 && frameCount % 100 == 0)
                     {
                         Debug.Log("[ProceduralObjects] DrawMesh code block has no instanced mesh(es) to draw.");
                     }
-                    foreach (var pair in equivalentDictCache)
+                    foreach (var pair in equivalentTRSDictCache)
                     {
                         /*if (pair.Value.Count <= 1000)
                         {
@@ -545,7 +590,7 @@ namespace ProceduralObjects
                             int subGroup = pair.Value.Count / subGroupSize;
                             for (int i = 0; i < subGroup + 1; i++)
                             {
-                                int currGroupSize = pair.Value.Count - i * subGroupSize > 1000 ? 1000 : pair.Value.Count - i * subGroupSize;
+                                int currGroupSize = pair.Value.Count - i * subGroupSize > subGroupSize ? subGroupSize : pair.Value.Count - i * subGroupSize;
                                 Debug.Log(string.Format("[ProceduralObjects] Item count equivalentScratchpad list {0} in iteration {1} is {2}, index of the first item in this iteration is {3}.", pair.Key.name, i, currGroupSize, i * subGroupSize));
                                 Matrix4x4[] subMatrix4x4s = new Matrix4x4[currGroupSize];
                                 for (int j = 0; j < currGroupSize; j++)
@@ -564,10 +609,11 @@ namespace ProceduralObjects
                             }
 
                         }*/
-                        foreach (Tuple<Matrix4x4, ShadowCastingMode, Color> item in pair.Value)
+                        //Debug.Log(string.Format("[ProceduralObjects] Mesh {0} count observed is {1}.", pair.Key.name, pair.Value.Length));
+                        for (int i = 0; i < pair.Value.Length; i++)
                         {
-                            propertyBlock.SetColor("_Color", item.Third);
-                            Graphics.DrawMesh(pair.Key, item.First, equivalentMtlDict[pair.Key], 0, renderCamera, 0, propertyBlock, item.Second, true);
+                            propertyBlock.SetColor("_Color", equivalentColorDictCache[pair.Key][i]);
+                            Graphics.DrawMesh(pair.Key, pair.Value[i], equivalentMtlDict[pair.Key], 0, renderCamera, 0, propertyBlock, equivalentShadowCastingDictCache[pair.Key][i], true);
                         }
                     }
 
