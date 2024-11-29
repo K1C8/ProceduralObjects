@@ -664,5 +664,42 @@ namespace ProceduralObjects.Classes
                 target.vertices = Vertex.CreateVertexList(target);
             }
         }
+
+        //public static string path = "/Assets/Bundles/ShaderPOTest.unity3d";
+
+        public static Dictionary<string, Shader> LoadShader()
+        {
+            Debug.Log("[ProceduralObjects] LoadShader() invoked.");
+
+
+            AssetBundle includedBundle = AssetBundle.LoadFromMemory(Properties.Resources.ShaderPOTest);
+            Dictionary<string, Shader> bundleLoader;
+
+            // From Klyte45's Write Everywhere code source, WriteEverywhere/WriteEverywhere.Assets/WEAssetLibrary.cs ReadShaders(AssetBundle bundle, out Dictionary<string, Shader> m_loadedShaders)
+            bundleLoader = new Dictionary<string, Shader>();
+            string[] bundleFiles = includedBundle.GetAllAssetNames();
+
+            foreach (string fileName in bundleFiles)
+            {
+                Debug.Log($"[ProceduralObjects] Reading file {fileName} inside the bundle {includedBundle}");
+                if (fileName.EndsWith(".shader"))
+                {
+                    Shader shader = includedBundle.LoadAsset<Shader>(fileName);
+                    string effectiveName = fileName.Split('.')[0].Split('/').Last();
+                    shader.name = $"Custom/ProceduralObject/Prop/{effectiveName}";
+                    bundleLoader[shader.name] = (shader);
+                }
+            }
+
+            foreach (var pair in bundleLoader)
+            {
+                Debug.Log(string.Format("[ProceduralObjects] LoadShader() loaded shader with effective name {0} within the included bundle.", pair.Key));
+            }
+
+            Debug.Log(string.Format("[ProceduralObjects] LoadShader() located {0} potential shaders. Unity running under mode {1}.", bundleLoader.Count, SystemInfo.graphicsDeviceType));
+
+            return bundleLoader;
+        }
+
     }
 }

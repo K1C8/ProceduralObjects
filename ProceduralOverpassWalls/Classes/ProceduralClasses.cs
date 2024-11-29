@@ -36,10 +36,10 @@ namespace ProceduralObjects.Classes
                 // Test version 241031 for draw mesh instancing tests
                 m_material = new Material(sourceProp.m_material); // Test version
                 m_material.enableInstancing = true;
-                // Dictionary<Mesh, SerializableVector3[]> dict = new Dictionary<Mesh, SerializableVector3[]>();
+                ProceduralUtils.InitMeshAndVertices(container, sourceProp.m_material.name, sourceProp.m_mesh, this);
                 // Tests end
 
-                if (container.meshStatus == 0 && container.vertices != null)
+                /*if (container.meshStatus == 0 && container.vertices != null)
                 {
                     // CHECK FOR MESH REPETITION
                     if (ProceduralUtils.CheckMeshEquivalence(container.vertices, sourceProp.m_mesh.vertices))
@@ -91,7 +91,7 @@ namespace ProceduralObjects.Classes
                     else
                         throw new Exception("[ProceduralObjects] Loading failure : Missing mesh data !");
                     vertices = Vertex.CreateVertexList(this);
-                }
+                }*/
 
 
                 if (sourceProp.m_mesh.name == "ploppableasphalt-prop" || sourceProp.m_mesh.name == "ploppableasphalt-decal")

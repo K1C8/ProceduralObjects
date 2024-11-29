@@ -98,8 +98,9 @@ namespace ProceduralObjects
 
         private bool isGPUSupportInstancing = false;
         private int frameCount;
-        private double renderTimeSum;
-        private DateTime startRenderTime;
+        private double poCalcTimeSum;
+        private double poDrawMeshTimeSum;
+        private DateTime lastRenderTime;
         private ConcurrentDictionary<Mesh, ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, Color>>> equivalentDict
                     = new ConcurrentDictionary<Mesh, ConcurrentQueue<Tuple<Matrix4x4, ShadowCastingMode, Color>>>();
         private ConcurrentDictionary<Mesh, Material> equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
@@ -109,8 +110,13 @@ namespace ProceduralObjects
         //private Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]> equivalentDictCache;
         private Dictionary<Mesh, Matrix4x4[]> equivalentTRSDictCache;
         private Dictionary<Mesh, ShadowCastingMode[]> equivalentShadowCastingDictCache;
-        private Dictionary<Mesh, Color[]> equivalentColorDictCache;
- 
+        //private Dictionary<Mesh, Color[]> equivalentColorDictCache;
+        private Dictionary<Mesh, Vector4[]> equivalentColorDictCache;
+
+        //private ComputeBuffer[] argsBufferArray;
+        private ComputeBuffer meshPropertiesBuffer;
+        //private uint[] args;
+
         void Start()
         {
             Debug.Log("[ProceduralObjects] v" + ProceduralObjectsMod.VERSION + " - Game start procedure started.");
@@ -121,6 +127,7 @@ namespace ProceduralObjects
             mainButton = view.AddUIComponent(typeof(ProceduralObjectsButton)) as ProceduralObjectsButton;
             mainButton.logic = this;
             renderCamera = Camera.main;
+            Dictionary<string, Shader> loadedShaders = ProceduralUtils.LoadShader();
             var pausePanel = view.GetComponentsInChildren<UIPanel>().First(panel => panel.name.Contains("PauseMenu"));
             if (pausePanel != null)
             {
@@ -216,22 +223,27 @@ namespace ProceduralObjects
             customDict = new ConcurrentDictionary<int, Matrix4x4>();
             overlayDict = new ConcurrentDictionary<int, Matrix4x4>();
             propertyBlock = new MaterialPropertyBlock();
-            propertyBlock.SetColor("_Color", Color.white);
+            //propertyBlock.SetColor("_Color", Color.white);
 
 
             equivalentTRSDictCache = new Dictionary<Mesh, Matrix4x4[]>();
             equivalentShadowCastingDictCache = new Dictionary<Mesh, ShadowCastingMode[]>();
-            equivalentColorDictCache = new Dictionary<Mesh, Color[]>();
+            equivalentColorDictCache = new Dictionary<Mesh, Vector4[]>();
 
-            if (isGPUSupportInstancing && proceduralObjects != null)
+            if (isGPUSupportInstancing && proceduralObjects != null & loadedShaders.ContainsKey("Custom/ProceduralObject/Prop/testshaderind"))
             {
-                string instancingKeyword = "INSTANCING_ON";
+                //string instancingKeyword = "INSTANCING_ON";
+                string shadeCastingKeyword = "SHADOWS_SCREEN";
                 for (int i = 0; i < proceduralObjects.Count; i++)
                 {
                     var obj = proceduralObjects[i];
-                    if (obj.meshStatus == 1 && !obj.m_material.IsKeywordEnabled(instancingKeyword))
+                    if (obj.meshStatus == 1)
                     {
-                        obj.m_material.EnableKeyword(instancingKeyword);
+                        loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testshaderind", out Shader instancedTestShader);
+                        
+                        obj.m_material.shader = instancedTestShader;
+                        obj.m_material.EnableKeyword(shadeCastingKeyword);
+                        obj.m_material.enableInstancing = true;
 #if DEBUG
                         Debug.Log(string.Format("[ProceduralObjects] Modifing {0}, {1}, {2} properties of shader {3} to {4}, {5}, {6}",
                             instancingKeyword, "", "", 
@@ -241,9 +253,12 @@ namespace ProceduralObjects
                     }
 
                 }
+                //args = new uint[5] { 0, 0, 0, 0, 0 };
+                //argsBufferArray = new ComputeBuffer[1];
+                //argsBufferArray[0] = new ComputeBuffer(1, args.Length * sizeof(uint), ComputeBufferType.IndirectArguments);
             }
 
-            startRenderTime = DateTime.Now;
+            lastRenderTime = DateTime.Now;
 
             loadingTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
             Debug.Log("[ProceduralObjects] Game start procedure ended in " + loadingTime + " seconds");
@@ -336,12 +351,10 @@ namespace ProceduralObjects
 
             frameCount++;
             var startTime = DateTime.Now;
-            var timeFromLastUpdate = Math.Round((DateTime.Now - startRenderTime).TotalMilliseconds, 2);
+            var timeFromLastUpdate = Math.Round((DateTime.Now - lastRenderTime).TotalMilliseconds, 2);
 
             if (proceduralObjects != null && timeFromLastUpdate >= 100.0)
             {
-                var sqrDynMinThreshold = ProceduralObjectsMod.DynamicRDMinThreshold.value * ProceduralObjectsMod.DynamicRDMinThreshold.value;
-                bool isNightTime = Singleton<SimulationManager>.instance.m_isNightTime;
                 equivalentDict.Clear();
                 equivalentMtlDict.Clear();
                 customDict.Clear();
@@ -352,6 +365,9 @@ namespace ProceduralObjects
 
                 void UpdateWorkerFunc(int start, int end)
                 {
+                    var sqrDynMinThreshold = ProceduralObjectsMod.DynamicRDMinThreshold.value * ProceduralObjectsMod.DynamicRDMinThreshold.value;
+                    bool isNightTime = Singleton<SimulationManager>.instance.m_isNightTime;
+
                     //Debug.Log(string.Format("[ProceduralObjects] Task outputing start {0} and end {1}.", start, end));
                     for (int i = start; i < end; i++)
                     {
@@ -437,10 +453,8 @@ namespace ProceduralObjects
                             }
                         }
                     }
-
                 }
                 int partitionCount = (int)Math.Ceiling(proceduralObjects.Count / (double)stepSize);
-                List<int> slots = new List<int>();
                 for (int i = 0; i < partitionCount; i++)
                 {
                     int start = i * stepSize;
@@ -451,29 +465,25 @@ namespace ProceduralObjects
                     });
                     calcTasks.Add(t);
                     t.Start();
-
-                    //slots.Add(i);
                 }
-
-                //Parallel.ForEach(slots, i => { UpdateWorkerFunc(i * stepSize, (i + 1) * stepSize < proceduralObjects.Count ? (i + 1) * stepSize : proceduralObjects.Count); });
                 
                 Task.WaitAll(calcTasks.ToArray());
-                
 
                 //equivalentDictCache.Clear();
                 equivalentTRSDictCache.Clear();
                 equivalentShadowCastingDictCache.Clear();
                 equivalentColorDictCache.Clear();
 
+                DateTime sortStartTime = DateTime.Now;
+
                 Tuple<Matrix4x4, ShadowCastingMode, Color> currItem = null;
                 foreach (var pair in equivalentDict)
                 {
-                    //equivalentDictCache.Add(pair.Key, pair.Value.ToArray());
-
                     int size = pair.Value.Count;
                     Matrix4x4[] matrix4X4s = new Matrix4x4[size];
                     ShadowCastingMode[] shadowCastings = new ShadowCastingMode[size];
-                    Color[] colors = new Color[size];
+                    //Color[] colors = new Color[size];
+                    Vector4[] colors = new Vector4[size];
                     int i = 0;
                     while (pair.Value.TryDequeue(out currItem) && i < size)
                     {
@@ -493,7 +503,9 @@ namespace ProceduralObjects
                         equivalentColorDictCache.Add(pair.Key, colors);
                     }
                 }
-                startRenderTime = DateTime.Now;
+                lastRenderTime = DateTime.Now;
+                double sortTime = Math.Round((DateTime.Now - sortStartTime).TotalMilliseconds, 2);
+                Debug.Log(string.Format("[ProceduralObjects] Sorting equivalentDictCache consumed {0} ms to complete.", sortTime));
 
 
                 // Original Version
@@ -557,11 +569,15 @@ namespace ProceduralObjects
                     }
                 }*/
             }
+
+            var poCalcTime = Math.Round((DateTime.Now - startTime).TotalMilliseconds, 2);
+            poCalcTimeSum += poCalcTime;
+
             if (proceduralObjects != null)
             {
                 try
                 {
-
+                    //int batchSizeLimit = 500;
                     /*if (equivalentDict.Count > 0)
                     {
                         Debug.Log("[ProceduralObjects] Preparing DrawMeshInstanced with " + equivalentScratchpad.Count + " instanced mesh(es).");
@@ -570,38 +586,46 @@ namespace ProceduralObjects
                     {
                         Debug.Log("[ProceduralObjects] DrawMesh code block has no instanced mesh(es) to draw.");
                     }
+
+                    if (meshPropertiesBuffer != null)
+                        meshPropertiesBuffer.Release();
+
                     foreach (var pair in equivalentTRSDictCache)
                     {
-                        /*if (pair.Value.Count <= 1000)
+                        /*if (pair.Value.Length <= batchSizeLimit)
                         {
-                            Graphics.DrawMeshInstanced(pair.Key, 0, mtlLUT[pair.Key], pair.Value, null, ShadowCastingMode.On, true, 0);
+                            propertyBlock.SetVectorArray("_Color", equivalentColorDictCache[pair.Key]);
+                            Graphics.DrawMeshInstanced(pair.Key, 0, equivalentMtlDict[pair.Key], pair.Value, pair.Value.Length, propertyBlock, ShadowCastingMode.On, true, 0);
                         }
                         else
                         {
-                            Shader shader = mtlLUT[pair.Key].shader;
+                            Shader shader = equivalentMtlDict[pair.Key].shader;
                             // Get all the local keywords that affect the Shader
                             var shaderName = shader.name;
-                            Debug.Log(string.Format("[ProceduralObjects] Peeking first item in equivalentScratchpad list {0}, item with m4x4s {1}, name of the shader of the material is {2}, with INSTANCING_ON set at {3}.", 
-                                pair.Key.name, pair.Value[0].ToString(), shaderName, mtlLUT[pair.Key].IsKeywordEnabled("INSTANCING_ON")));
+                            Debug.Log(string.Format("[ProceduralObjects] Peeking first item in equivalentTRSDictCache list {0}, item with m4x4s {1}, name of the shader of the material is {2}, material instancing property is {3}, with the shader of the material has INSTANCING_ON set at {4}.",
+                                pair.Key.name, pair.Value[0].ToString(), shaderName, equivalentMtlDict[pair.Key].enableInstancing, equivalentMtlDict[pair.Key].IsKeywordEnabled("INSTANCING_ON")));
 
 
-                            Debug.Log(string.Format("[ProceduralObjects] Item count in equivalentScratchpad list {0} is {1}.", pair.Key.name, pair.Value.Count));
-                            int subGroupSize = 1000;
-                            int subGroup = pair.Value.Count / subGroupSize;
-                            for (int i = 0; i < subGroup + 1; i++)
+                            Debug.Log(string.Format("[ProceduralObjects] Item count in equivalentTRSDictCache list {0} is {1}.", pair.Key.name, pair.Value.Length));
+                            int subGroupSize = batchSizeLimit;
+                            int subGroup = (int)Math.Ceiling(pair.Value.Length / (double)subGroupSize);
+                            for (int i = 0; i < subGroup; i++)
                             {
-                                int currGroupSize = pair.Value.Count - i * subGroupSize > subGroupSize ? subGroupSize : pair.Value.Count - i * subGroupSize;
-                                Debug.Log(string.Format("[ProceduralObjects] Item count equivalentScratchpad list {0} in iteration {1} is {2}, index of the first item in this iteration is {3}.", pair.Key.name, i, currGroupSize, i * subGroupSize));
+                                int currGroupSize = pair.Value.Length - i * subGroupSize > subGroupSize ? subGroupSize : pair.Value.Length - i * subGroupSize;
+                                Debug.Log(string.Format("[ProceduralObjects] Item count equivalentTRSDictCache list {0} in iteration {1} is {2}, index of the first item in this iteration is {3}.", pair.Key.name, i, currGroupSize, i * subGroupSize));
                                 Matrix4x4[] subMatrix4x4s = new Matrix4x4[currGroupSize];
+                                Vector4[] subColors = new Vector4[currGroupSize];
                                 for (int j = 0; j < currGroupSize; j++)
                                 {
                                     subMatrix4x4s[j] = pair.Value[i * subGroupSize + j];
+                                    subColors[j] = equivalentColorDictCache[pair.Key][i * subGroupSize + j];
                                 }
                                 try
                                 {
                                     //Debug.Log(string.Format("[ProceduralObjects] Peeking first item in equivalentScratchpad list {0} iteration {1}, item with m4x4s {2}.", pair.Key.name, i, subMatrix4x4s[0].ToString()));
-                                    Graphics.DrawMeshInstanced(pair.Key, 0, mtlLUT[pair.Key], subMatrix4x4s, currGroupSize, null, ShadowCastingMode.On, true, 0);
-                                } 
+                                    propertyBlock.SetVectorArray("_Color", subColors);
+                                    Graphics.DrawMeshInstanced(pair.Key, 0, equivalentMtlDict[pair.Key], subMatrix4x4s, currGroupSize, propertyBlock, ShadowCastingMode.On, true, 0);
+                                }
                                 catch (Exception e)
                                 {
                                     Debug.LogError("[ProceduralObjects] Error while rendering mesh " + pair.Key.name + ": " + e.Message + " - Stack Trace : " + e.StackTrace);
@@ -609,12 +633,52 @@ namespace ProceduralObjects
                             }
 
                         }*/
-                        //Debug.Log(string.Format("[ProceduralObjects] Mesh {0} count observed is {1}.", pair.Key.name, pair.Value.Length));
+                        if (pair.Key == null)
+                        {
+                            Debug.Log("[ProceduralObjects] Empty mesh encountered during rendering process.");
+                            continue;
+                        }
+                        uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
+                        args[0] = (pair.Key != null) ? pair.Key.GetIndexCount(0) : 0;
+                        args[1] = (uint)pair.Value.Length;
+                        args[2] = pair.Key.GetIndexStart(0);
+                        ComputeBuffer argsBuffer = new ComputeBuffer(1, args.Length * sizeof(uint), ComputeBufferType.IndirectArguments);
+                        argsBuffer.SetData(args);
+                        //argsBufferArray[0].SetData(args);
+
+                        //propertyBlock.Clear();
+                        meshPropertiesBuffer = new ComputeBuffer(pair.Value.Length, MeshProperties.Size());
+                        MeshProperties[] propertiesArray = new MeshProperties[pair.Value.Length];
                         for (int i = 0; i < pair.Value.Length; i++)
                         {
-                            propertyBlock.SetColor("_Color", equivalentColorDictCache[pair.Key][i]);
-                            Graphics.DrawMesh(pair.Key, pair.Value[i], equivalentMtlDict[pair.Key], 0, renderCamera, 0, propertyBlock, equivalentShadowCastingDictCache[pair.Key][i], true);
+                            MeshProperties property = new MeshProperties
+                            {
+                                position = pair.Value[i],
+                                castShadow = equivalentShadowCastingDictCache[pair.Key][i] == ShadowCastingMode.On ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0),
+                                color = equivalentColorDictCache[pair.Key][i]
+                            };
+                            propertiesArray[i] = property;
                         }
+
+                        meshPropertiesBuffer.SetData(propertiesArray);
+                        propertyBlock.SetBuffer("_Properties", meshPropertiesBuffer);
+                        try
+                        {
+                            //Debug.Log(string.Format("[ProceduralObjects] Peeking first item in equivalentScratchpad list {0} iteration {1}, item with m4x4s {2}.", pair.Key.name, i, subMatrix4x4s[0].ToString()));
+                            //Graphics.DrawMeshInstancedIndirect(pair.Key, 0, equivalentMtlDict[pair.Key], new Bounds(Vector3.zero, new Vector3(10000.0f, 10000.0f, 10000.0f)), argsBufferArray[0], 0, propertyBlock, ShadowCastingMode.On, true, 0, renderCamera);
+                            Graphics.DrawMeshInstancedIndirect(pair.Key, 0, equivalentMtlDict[pair.Key], new Bounds(Vector3.zero, new Vector3(10000.0f, 10000.0f, 10000.0f)), argsBuffer, 0, propertyBlock, ShadowCastingMode.On, true, 0, renderCamera);
+                        }
+                        catch (Exception e)
+                        {
+                            Debug.LogError("[ProceduralObjects] Error while rendering mesh instanced indirect " + pair.Key.name + ": " + e.Message + " - Stack Trace : " + e.StackTrace);
+                        }
+
+                        Debug.Log(string.Format("[ProceduralObjects] Mesh {0} count observed is {1}.", pair.Key.name, pair.Value.Length));
+                        //for (int i = 0; i < pair.Value.Length; i++)
+                        //{
+                        //    propertyBlock.SetColor("_Color", equivalentColorDictCache[pair.Key][i]);
+                        //    Graphics.DrawMesh(pair.Key, pair.Value[i], equivalentMtlDict[pair.Key], 0, renderCamera, 0, propertyBlock, equivalentShadowCastingDictCache[pair.Key][i], true);
+                        //}
                     }
 
                     foreach (var pair in customDict)
@@ -634,14 +698,16 @@ namespace ProceduralObjects
                     Debug.LogError("[ProceduralObjects] Error while rendering objects " + e.Message + " - Stack Trace : " + e.StackTrace);
                 }
 
+                var poDrawMeshTime = Math.Round((DateTime.Now - startTime).TotalMilliseconds, 2) - poCalcTime;
+                poDrawMeshTimeSum += poDrawMeshTime;
 
-                var frameRenderTime = Math.Round((DateTime.Now - startTime).TotalMilliseconds, 2);
-                renderTimeSum += frameRenderTime;
                 if (frameCount == 1000)
                 {
-                    Debug.Log("[ProceduralObjects] Calculation of Procedural Objects in most recent 1000 frames consumed " + Math.Round(renderTimeSum / 1000, 2) + " milliseconds per frame.");
+                    Debug.Log("[ProceduralObjects] In the most recent 1000 frames, calculating positions of Procedural Objects consumed " + Math.Round(poCalcTimeSum / 1000, 2) + " milliseconds per frame, " 
+                        + "invoking DrawMesh for Procedural Objects consumed " + Math.Round(poDrawMeshTimeSum / 1000, 2) + " milliseconds per frame.");
                     frameCount = 0;
-                    renderTimeSum = 0.0;
+                    poCalcTimeSum = 0.0;
+                    poDrawMeshTimeSum = 0.0;
                 }
 
 
@@ -3864,6 +3930,19 @@ namespace ProceduralObjects
                 });
             }
         }
+
+        void OnDisable()
+        {
+            if (meshPropertiesBuffer != null)
+                meshPropertiesBuffer.Release();
+            meshPropertiesBuffer = null;
+
+            //if (argsBufferArray != null && argsBufferArray[0] != null)
+            //    argsBufferArray[0].Release();
+            //argsBufferArray[0] = null;
+            //argsBufferArray = null;
+        }
+
         private void CloseAllSMWindows()
         {
             CloseExternalsWindow();
@@ -4416,6 +4495,21 @@ namespace ProceduralObjects
             {
                 var tuple = new Tuple<T1, T2, T3>(first, second, third);
                 return tuple;
+            }
+        }
+
+        private struct MeshProperties
+        {
+            public Matrix4x4 position;
+            public Vector4 color;
+            public Vector4 castShadow;
+
+            public static int Size()
+            {
+                return
+                    sizeof(float) * 4 * 4 + // position;
+                    sizeof(float) * 4 +     // color;
+                    sizeof(float) * 4;      // castShadow;
             }
         }
 

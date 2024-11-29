@@ -72,6 +72,11 @@
     <Compile Include="ProceduralModules\ModuleManager.cs" />
     <Compile Include="ProceduralModules\POModule.cs" />
     <Compile Include="ProceduralTool\POToolAction.cs" />
+    <Compile Include="Properties\Resources.Designer.cs">
+      <AutoGen>True</AutoGen>
+      <DesignTime>True</DesignTime>
+      <DependentUpon>Resources.resx</DependentUpon>
+    </Compile>
     <Compile Include="SelectionMode\AlignBetween2.cs" />
     <Compile Include="SelectionMode\AlignHeights.cs" />
     <Compile Include="SelectionMode\AlignRotations.cs" />
@@ -126,6 +131,10 @@
   <ItemGroup>
     <EmbeddedResource Include="Icons\invisible.png" />
     <EmbeddedResource Include="Icons\visible.png" />
+    <EmbeddedResource Include="Properties\Resources.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Icons\duplicate.png" />
@@ -218,6 +227,8 @@
     <EmbeddedResource Include="Icons\CTA_splitVertex.png" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Assets\Bundles\ShaderPOTest.unity3d" />
+    <None Include="Assets\SrcCustomShaders\ProceduralProp.shader" />
     <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
