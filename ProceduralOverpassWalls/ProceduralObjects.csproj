@@ -233,7 +233,8 @@
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
-    <PostBuildEvent>xcopy /y  "$(TargetDir)ProceduralObjects.dll" "E:\Program Files (x86)\Steam\steamapps\workshop\content\255710\1094334744"</PostBuildEvent>
+    <PostBuildEvent>xcopy /y  "$(TargetDir)ProceduralObjects.dll" "E:\Program Files (x86)\Steam\steamapps\workshop\content\255710\1094334744"
+xcopy /y  "$(TargetDir)ProceduralObjects.dll" "G:\Exchange\mod-debug-build\1094334744"</PostBuildEvent>
   </PropertyGroup>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.
