@@ -9,6 +9,8 @@ using System.IO;
 
 using ColossalFramework;
 using ColossalFramework.IO;
+using System.Threading.Tasks;
+using System.Collections.Concurrent;
 
 namespace ProceduralObjects.Classes
 {
@@ -197,6 +199,16 @@ namespace ProceduralObjects.Classes
             }
             return list.ToArray();
         }
+
+        public delegate Material getMaterialCallback(Material source);
+
+        public static Material GetMaterialUtil(Material source)
+        {
+            return new Material(source);
+        }
+
+
+
         public static void LoadContainerData(this ProceduralObjectsLogic logic, ProceduralObjectContainer[] containerArray)
         {
             logic.proceduralObjects = new List<ProceduralObject>();
@@ -233,6 +245,96 @@ namespace ProceduralObjects.Classes
                     logic.failedToLoadObjects += 1;
                 }
             }
+
+            // Temporary test for multi-threaded loading, PopupStart.RegisterFailure is not modified to be thread-safe.
+
+            /*Material[] materials = new Material[containerArray.Length];
+
+
+            for (int i = 0; i < containerArray.Length; i++)
+            {
+                var c = containerArray[i];
+                Material currMat;
+                if (c.objectType == "PROP")
+                {
+                    PropInfo sourceProp = props.FirstOrDefault(info => info.name == c.basePrefabName);
+                    currMat = new Material(sourceProp.m_material);
+                }
+                else
+                {
+                    BuildingInfo sourceProp = buildings.FirstOrDefault(info => info.name == c.basePrefabName);
+                    currMat = new Material(sourceProp.m_material);
+                }
+                materials[i] = currMat;
+            }
+            Debug.Log("[ProceduralObjects] Material list materials has " + materials.Length + " records.");
+
+            ConcurrentDictionary<int, ProceduralObject> poDict = new ConcurrentDictionary<int, ProceduralObject>();
+            ConcurrentDictionary<ProceduralObjectContainer, Exception> errorDict = new ConcurrentDictionary<ProceduralObjectContainer, Exception>();
+
+            void PopulateFromContainers(int start, int end)
+            {
+                for (int i = start; i < end; i++)
+                {
+                    var c = containerArray[i];
+                    try
+                    {
+                        Debug.Log("[ProceduralObjects] Task " + Task.CurrentId + " processing container " + i + ", container.id: " + c.id);
+                        var obj = new ProceduralObject(c, logic.layerManager, props, buildings, materials[i]);
+                        if (obj.meshStatus != 1)
+                        {
+                            if (obj.RequiresUVRecalculation && !obj.disableRecalculation)
+                                obj.m_mesh.uv = Vertex.RecalculateUVMap(obj, Vertex.CreateVertexList(obj));
+                        }
+                        obj.RecalculateBoundsNormalsExtras(obj.meshStatus);
+                        //logic.proceduralObjects.Add(obj);
+                        //logic.activeIds.Add(obj.id);
+                        poDict.GetOrAdd(i, obj);
+                        Debug.Log("[ProceduralObjects] Task " + Task.CurrentId + " finished processing container " + i + ", container.id: " + c.id);
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogError("[ProceduralObjects] Failed to load a Procedural Object : \n" + e.GetType().ToString() + " : " + e.Message + "\n" + e.StackTrace + "\nObject loading order number: " + i + ", container.id: " + c.id + ", task number: " + Task.CurrentId);
+                        //PopupStart.RegisterFailure(c, e, props, buildings);
+                        errorDict.GetOrAdd(c, e);
+                        logic.failedToLoadObjects += 1;
+                    }
+                }
+            }
+
+            int stepSize = 1000;
+            List<Task> calcTasks = new List<Task>();
+
+            int partitionCount = (int)Math.Ceiling(containerArray.Length / (double)stepSize);
+            for (int i = 0; i < partitionCount; i++)
+            {
+                int start = i * stepSize;
+                int end = (i + 1) * stepSize < containerArray.Length ? (i + 1) * stepSize : containerArray.Length;
+                Task t = new Task(() =>
+                {
+                    PopulateFromContainers(start, end);
+                });
+                calcTasks.Add(t);
+                t.Start();
+            }
+
+            Task.WaitAll(calcTasks.ToArray());
+            for (int i = 0; i < containerArray.LongLength; i++)
+            {
+                if (poDict.TryGetValue(i, out ProceduralObject obj))
+                {
+                    logic.proceduralObjects.Add(obj);
+                    logic.activeIds.Add(obj.id);
+                }
+            }
+            foreach (var v in errorDict.ToList())
+            {
+                PopupStart.RegisterFailure(v.Key, v.Value, props, buildings);
+            }
+
+            */
+            // Test end
+
             PopupStart.LoadingDoneShowPopup();
         }
         public static List<POGroup> BuildGroupsFromData(this ProceduralObjectsLogic logic)

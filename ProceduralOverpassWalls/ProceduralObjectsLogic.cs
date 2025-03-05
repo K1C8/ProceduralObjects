@@ -236,7 +236,11 @@ namespace ProceduralObjects
             equivalentShadowCastingDictCache = new Dictionary<Mesh, ShadowCastingMode[]>();
             equivalentColorDictCache = new Dictionary<Mesh, Vector4[]>();
 
-            if (isGPUSupportInstancing && proceduralObjects != null & loadedShaders.ContainsKey("Custom/ProceduralObject/Prop/testshaderindsurf"))
+            Debug.Log(string.Format("[ProceduralObjects] Checking for compatibility, isGPUSupportInstancing: {0}, shaders contains testshaderind: {1}", isGPUSupportInstancing, loadedShaders.ContainsKey("Custom/ProceduralObject/Prop/testshaderind")));
+
+            long updateCount = 0;
+
+            if (isGPUSupportInstancing && proceduralObjects != null && loadedShaders.ContainsKey("Custom/ProceduralObject/Prop/testshaderind"))
             {
                 //string instancingKeyword = "INSTANCING_ON";
                 string shadeCastingKeyword = "SHADOWS_SCREEN";
@@ -248,9 +252,9 @@ namespace ProceduralObjects
                 for (int i = 0; i < proceduralObjects.Count; i++)
                 {
                     var obj = proceduralObjects[i];
-                    if (obj.meshStatus == 1 && obj.m_material.shader.name.Equals("Custom/Props/Prop/Default"))
+                    if (obj.meshStatus == 1 && obj.m_material.shader.name.Equals("Custom/Props/Prop/Default") && obj.m_textParameters == null)
                     {
-                        loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testshaderindsurf", out Shader instancedTestShader);
+                        loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testshaderind", out Shader instancedTestShader);
                         if (!isExported)
                         {
                             Debug.Log("[ProceduralObjects] Exporting Default Shader: \n" + obj.m_material.shader);
@@ -259,6 +263,7 @@ namespace ProceduralObjects
                         obj.m_material.shader = instancedTestShader;
                         obj.m_material.EnableKeyword(shadeCastingKeyword);
                         obj.m_material.enableInstancing = true;
+                        updateCount++;
                         //if (!equivalentPropertiesComputeBuffer.ContainsKey(obj.m_mesh))
                         //{
                         //    equivalentPropertiesComputeBuffer.Add(obj.m_mesh, new ComputeBuffer(pair.Value.Length, MeshProperties.Size()));
@@ -281,6 +286,7 @@ namespace ProceduralObjects
             lastRenderTime = DateTime.Now;
 
             loadingTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
+            Debug.Log("[ProceduralObjects] Game start procedure updated " + updateCount + " procedural objects with test shader.");
             Debug.Log("[ProceduralObjects] Game start procedure ended in " + loadingTime + " seconds");
         }
 
@@ -431,11 +437,11 @@ namespace ProceduralObjects
                                 if (RenderOptions.instance.CanRenderSingle(obj, isNightTime))
                                 {
                                     // For test only, material differences like custom texts/rects are not yet considered.
-                                    if (obj.meshStatus == 2 || !isGPUSupportInstancing)
+                                    if (obj.meshStatus == 2 || !isGPUSupportInstancing || !obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testshaderind"))
                                     {
                                         customDict.GetOrAdd(i, m4x4);
                                     }
-                                    else if (obj.meshStatus == 1 && isGPUSupportInstancing)
+                                    else if (obj.meshStatus == 1 && isGPUSupportInstancing && obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testshaderind"))
                                     {
                                         Tuple<Matrix4x4, ShadowCastingMode, Color> itemTuple =
                                             new Tuple<Matrix4x4, ShadowCastingMode, Color>(m4x4, obj.disableCastShadows ? ShadowCastingMode.Off : ShadowCastingMode.On, obj.m_color);
