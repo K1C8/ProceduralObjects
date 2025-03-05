@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using System.Linq;
 using System.Xml;
 using System.Text;
@@ -19,11 +20,11 @@ namespace ProceduralObjects.Classes
     public class ProceduralObject
     {
         public ProceduralObject() { }
-        public ProceduralObject(ProceduralObjectContainer container, LayerManager layerManager, PropInfo[] props, BuildingInfo[] buildings)
+        public ProceduralObject(ProceduralObjectContainer container, LayerManager layerManager, PropInfo[] props, BuildingInfo[] buildings) //, Material sourceMaterial) //, getMaterialCallback handle)
         {
             if (container.objectType == "PROP")
             {
-                PropInfo sourceProp = props.FirstOrDefault(info => info.name == container.basePrefabName);
+                PropInfo sourceProp = props.FirstOrDefault(info => info.name.Equals(container.basePrefabName));
                 this._baseProp = sourceProp;
                 this.id = container.id;
                 this.basePrefabName = container.basePrefabName;
@@ -35,6 +36,7 @@ namespace ProceduralObjects.Classes
 
                 // Test version 241031 for draw mesh instancing tests
                 m_material = new Material(sourceProp.m_material); // Test version
+                // m_material = sourceMaterial;  // Multithreaded version
                 m_material.enableInstancing = true;
                 ProceduralUtils.InitMeshAndVertices(container, sourceProp.m_material.name, sourceProp.m_mesh, this);
                 // Tests end
@@ -98,6 +100,7 @@ namespace ProceduralObjects.Classes
                     m_color = m_material.ApplyPloppableColor();
                 if (container.hasCustomTexture && TextureManager.instance != null)
                 {
+                    Debug.Log("[ProceduralObjects] Task " + Task.CurrentId + " loading custom texture from containers test. Container object name is " + _baseProp.name);
                     var customTex = TextureManager.instance.FindTexture(container.customTextureName);
                     m_material.mainTexture = customTex as Texture;
                     customTexture = customTex;
@@ -105,7 +108,7 @@ namespace ProceduralObjects.Classes
             }
             else if (container.objectType == "BUILDING")// building
             {
-                BuildingInfo sourceProp = buildings.FirstOrDefault(info => info.name == container.basePrefabName);
+                BuildingInfo sourceProp = buildings.FirstOrDefault(info => info.name.Equals(container.basePrefabName));
                 this._baseBuilding = sourceProp;
                 this.id = container.id;
                 this.basePrefabName = container.basePrefabName;
@@ -117,63 +120,8 @@ namespace ProceduralObjects.Classes
 
                 // Test version 241031
                 m_material = new Material(sourceProp.m_material); // Test version
+                // m_material = sourceMaterial; // Multithreaded version
                 m_material.enableInstancing = true;  // Test version
-
-                /*
-                if (container.meshStatus == 0 && container.vertices != null)
-                {
-                    // CHECK FOR MESH REPETITION
-                    if (ProceduralUtils.CheckMeshEquivalence(container.vertices, sourceProp.m_mesh.vertices))
-                    {
-                        meshStatus = 1;
-                        m_mesh = sourceProp.m_mesh;
-                        vertices = Vertex.CreateVertexList(sourceProp);
-                    }
-                    else
-                    {
-                        meshStatus = 2;
-                        m_mesh = sourceProp.m_mesh.InstantiateMesh();
-                        var vert = SerializableVector3.ToStandardVector3Array(container.vertices);
-                        if (container.scale != 0)
-                        {
-                            for (int i = 0; i < vert.Count(); i++)
-                            {
-                                vert[i] = new Vector3(vert[i].x * container.scale, vert[i].y * container.scale, vert[i].z * container.scale);
-                            }
-                        }
-                        m_mesh.SetVertices(new List<Vector3>(vert));
-                        vertices = Vertex.CreateVertexList(this);
-                    }
-                }
-                else if (container.meshStatus == 1)
-                {
-                    meshStatus = 1;
-                    m_mesh = sourceProp.m_mesh;
-                    vertices = Vertex.CreateVertexList(sourceProp);
-                }
-                else // meshstatus2
-                {
-                    meshStatus = 2;
-                    m_mesh = sourceProp.m_mesh.InstantiateMesh();
-                    if (container.serializedMeshData != null)
-                        container.serializedMeshData.ApplyDataToObject(this);
-                    else if (container.vertices != null)
-                    {
-                        var vert = SerializableVector3.ToStandardVector3Array(container.vertices);
-                        if (container.scale != 0)
-                        {
-                            for (int i = 0; i < vert.Count(); i++)
-                            {
-                                vert[i] = new Vector3(vert[i].x * container.scale, vert[i].y * container.scale, vert[i].z * container.scale);
-                            }
-                        }
-                        m_mesh.SetVertices(new List<Vector3>(vert));
-                    }
-                    else
-                        throw new Exception("[ProceduralObjects] Loading failure : Missing mesh data !");
-                    vertices = Vertex.CreateVertexList(this);
-                }
-                */
 
                 ProceduralUtils.InitMeshAndVertices(container, sourceProp.m_material.name, sourceProp.m_mesh, this);
 
@@ -206,6 +154,7 @@ namespace ProceduralObjects.Classes
 
                 if (container.hasCustomTexture && TextureManager.instance != null)
                 {
+                    Debug.Log("[ProceduralObjects] Task " + Task.CurrentId + " loading custom texture from containers test. Container object name is " + _baseBuilding.name);
                     var customTex = TextureManager.instance.FindTexture(container.customTextureName);
                     m_material.mainTexture = customTex as Texture;
                     customTexture = customTex;
@@ -215,7 +164,9 @@ namespace ProceduralObjects.Classes
             renderDistance = container.renderDistance;
             MaterialOptions.FixDecalRenderDist(this);
             renderDistLocked = container.renderDistLocked;
-            if (container.textParam != null)
+
+            // Note: Following code needed to move into a separate pre/post-process function to avoid crashing MT process.
+            /*if (container.textParam != null)
             {
                 meshStatus = 2;
                 m_textParameters = TextParameters.Clone(container.textParam, true);
@@ -235,8 +186,10 @@ namespace ProceduralObjects.Classes
                 originalTex.Apply();
                 m_material.mainTexture = m_textParameters.ApplyParameters(originalTex) as Texture;
             }
-            else
+            else*/
                 m_textParameters = null;
+            // Note end.
+
             if (container.belongsToGroup)
             {
                 if (container.groupRootId == -1)
@@ -261,6 +214,7 @@ namespace ProceduralObjects.Classes
             this.normalsRecalcMode = container.normalsRecalculation;
             this.flipFaces = container.flipFaces;
             this.disableCastShadows = container.disableCastShadows;
+            Debug.Log("[ProceduralObjects] Task " + Task.CurrentId + " loading data from container.id: " + container.id +". Container object name is " + _baseProp.name);
             if (this.flipFaces)
                VertexUtils.flipFaces(this);
             historyEditionBuffer = new HistoryBuffer(this);

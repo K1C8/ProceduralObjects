@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.IO;
+using System.Collections.Concurrent;
 using ColossalFramework.IO;
 using UnityEngine;
 
@@ -124,12 +125,35 @@ namespace ProceduralObjects.Classes
                     else
                         currentFailuresIndex += 1;
                 }
-                /*
+                /*if (loading_failures.TryPeek(out _))
+                {
+                    loading_failures.TryDequeue(out POLoadingFailureGroup f);
+                    if (f.DrawUI(new Rect(10, 50, 580, 250)))
+                    {
+                        if (f.sameForAllToggle)
+                        {
+                            for (int i = currentFailuresIndex; i < loading_failures.Count; i++)
+                            {
+                                loading_failures[i].keep = f.keep;
+                            }
+                            AllowedToShow = false;
+                            return;
+                        }
+                        if (currentFailuresIndex == loading_failures.Count - 1)
+                        {
+                            AllowedToShow = false;
+                        }
+                        else
+                            currentFailuresIndex += 1;
+                    }
+                }
+                *//*
                 if (GUI.Button(new Rect(235, 310, 215, 30), LocalizationManager.instance.current["ok"]))
                     AllowedToShow = false; */
             }
         }
 
+        //public static ConcurrentQueue<POLoadingFailureGroup> loading_failures = new ConcurrentQueue<POLoadingFailureGroup>();
         public static List<POLoadingFailureGroup> loading_failures = new List<POLoadingFailureGroup>();
         public static void RegisterFailure(ProceduralObjectContainer container, Exception e, PropInfo[] props, BuildingInfo[] buildings)
         {
@@ -168,6 +192,7 @@ namespace ProceduralObjects.Classes
                 group = new POLoadingFailureGroup(missingAsset);
                 group.containers.Add(container, e);
                 loading_failures.Add(group);
+                //loading_failures.Enqueue(group);
             }
         }
         public static void LoadingDoneShowPopup()
