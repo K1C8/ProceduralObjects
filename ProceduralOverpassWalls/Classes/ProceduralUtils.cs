@@ -57,12 +57,6 @@ namespace ProceduralObjects.Classes
             return null;
         }
 
-        public static void InvalidCacheOnObjectDelete(int id)
-        {
-            if 
-        }
-
-
         public static Vector2 WorldToGuiPoint(this Vector3 position)
         {
             var guiPosition = Camera.main.WorldToScreenPoint(position);
