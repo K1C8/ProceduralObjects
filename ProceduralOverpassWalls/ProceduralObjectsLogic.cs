@@ -97,6 +97,8 @@ namespace ProceduralObjects
         private static AudioClip[] audiosClips;
 
         private bool isGPUSupportInstancing = false;
+        private int profiledLength = 0;
+        private int profileInterval = 10000;
         private int frameCount;
         private double poCalcTimeSum;
         private double poDrawMeshTimeSum;
@@ -118,6 +120,8 @@ namespace ProceduralObjects
         //private ComputeBuffer[] argsBufferArray;
         //private ComputeBuffer meshPropertiesBuffer;
         //private uint[] args;
+
+        private static Dictionary<int, ProceduralObject> _groupRootCache = new Dictionary<int, ProceduralObject>();
 
         void Start()
         {
@@ -191,7 +195,10 @@ namespace ProceduralObjects
             if (ProceduralObjectsMod.tempContainerData != null)
             {
                 this.LoadContainerData(ProceduralObjectsMod.tempContainerData);
+                DateTime groupBuildingStartTime = DateTime.Now;
                 groups = this.BuildGroupsFromData();
+                double groupBuildingTime = Math.Round((DateTime.Now - groupBuildingStartTime).TotalSeconds, 2);
+                Debug.Log(string.Format("[ProceduralObjects] PO groupped in {0} seconds.", groupBuildingTime));
                 ProceduralObjectsMod.tempContainerData = null;
             }
             else
@@ -244,7 +251,6 @@ namespace ProceduralObjects
             {
                 //string instancingKeyword = "INSTANCING_ON";
                 string shadeCastingKeyword = "SHADOWS_SCREEN";
-                bool isExported = false;
                 equivalentPropertiesComputeBuffer = new Dictionary<Mesh, ComputeBuffer>();
                 equivalentArgsComputeBuffer = new Dictionary<Mesh, ComputeBuffer>();
                 uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
@@ -255,11 +261,11 @@ namespace ProceduralObjects
                     if (obj.meshStatus == 1 && obj.m_material.shader.name.Equals("Custom/Props/Prop/Default") && obj.m_textParameters == null)
                     {
                         loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testshaderind", out Shader instancedTestShader);
-                        if (!isExported)
-                        {
-                            Debug.Log("[ProceduralObjects] Exporting Default Shader: \n" + obj.m_material.shader);
-                            isExported = true;
-                        }
+                        //if (!isExported)
+                        //{
+                        //    Debug.Log("[ProceduralObjects] Exporting Default Shader: \n" + obj.m_material.shader);
+                        //    isExported = true;
+                        //}
                         obj.m_material.shader = instancedTestShader;
                         obj.m_material.EnableKeyword(shadeCastingKeyword);
                         obj.m_material.enableInstancing = true;
@@ -437,11 +443,11 @@ namespace ProceduralObjects
                                 if (RenderOptions.instance.CanRenderSingle(obj, isNightTime))
                                 {
                                     // For test only, material differences like custom texts/rects are not yet considered.
-                                    if (obj.meshStatus == 2 || !isGPUSupportInstancing || !obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testshaderind"))
+                                    if (obj.meshStatus == 2 || !obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testshaderind"))
                                     {
                                         customDict.GetOrAdd(i, m4x4);
                                     }
-                                    else if (obj.meshStatus == 1 && isGPUSupportInstancing && obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testshaderind"))
+                                    else if (obj.meshStatus == 1 && obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testshaderind"))
                                     {
                                         Tuple<Matrix4x4, ShadowCastingMode, Color> itemTuple =
                                             new Tuple<Matrix4x4, ShadowCastingMode, Color>(m4x4, obj.disableCastShadows ? ShadowCastingMode.Off : ShadowCastingMode.On, obj.m_color);
@@ -532,6 +538,7 @@ namespace ProceduralObjects
                         MeshProperties property = new MeshProperties
                         {
                             position = currItem.First,
+                            // TODO: Maybe consider using const ref here to replace repeatly creating new Vector4 instances.
                             castShadow = currItem.Second == ShadowCastingMode.On ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0),
                             color = currItem.Third
                         };
@@ -785,6 +792,7 @@ namespace ProceduralObjects
                                             moduleManager.DeleteAllModules(obj);
                                             proceduralObjects.Remove(obj);
                                             activeIds.Remove(obj.id);
+                                            InvalidCacheById(obj.id); // Caching Test
                                         }
                                         pObjSelection.Clear();
                                     });
@@ -2476,6 +2484,7 @@ namespace ProceduralObjects
                                                     activeIds.Remove(obj.id);
                                                     pObjSelection.Remove(obj);
                                                     hoveredObj = null;
+                                                    InvalidCacheById(obj.id); // Caching Test
                                                 });
                                             }
                                         }
@@ -2637,6 +2646,7 @@ namespace ProceduralObjects
                                                     moduleManager.DeleteAllModules(po);
                                                     proceduralObjects.Remove(po);
                                                     activeIds.Remove(po.id);
+                                                    InvalidCacheById(po.id); // Caching Test
                                                 }
                                                 pObjSelection.Clear();
                                             });
@@ -3864,6 +3874,7 @@ namespace ProceduralObjects
                         moduleManager.DeleteAllModules(po);
                         proceduralObjects.Remove(po);
                         activeIds.Remove(po.id);
+                        InvalidCacheById(po.id); // Caching Test
                     }
                     ConfirmMovingWhole(false);
                 }
@@ -4244,6 +4255,8 @@ namespace ProceduralObjects
                 moduleManager.DeleteAllModules(currentlyEditingObject);
                 proceduralObjects.Remove(currentlyEditingObject);
                 activeIds.Remove(currentlyEditingObject.id);
+                InvalidCacheById(currentlyEditingObject.id); // Caching Test
+
                 if (currentlyEditingObject.group != null)
                     currentlyEditingObject.group.Remove(this, currentlyEditingObject);
                 //  Object.Destroy(currentlyEditingObject.gameObject);
@@ -4496,6 +4509,27 @@ namespace ProceduralObjects
             {
                 var tuple = new Tuple<T1, T2, T3>(first, second, third);
                 return tuple;
+            }
+        }
+
+        public ProceduralObject GetCachedObjectById(int id)
+        {
+            if (_groupRootCache.TryGetValue(id, out var cached))
+                return cached;
+            return null;
+        }
+
+        public void AddObjectToCacheByListIndex(int index)
+        {
+            var id = proceduralObjects[index].id;
+            _groupRootCache[id] = proceduralObjects[index];
+        }
+
+        public void InvalidCacheById(int id)
+        {
+            if (_groupRootCache.ContainsKey(id)) 
+            {
+                _groupRootCache.Remove(id);
             }
         }
 

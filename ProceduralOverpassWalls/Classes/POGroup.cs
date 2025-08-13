@@ -114,6 +114,7 @@ namespace ProceduralObjects.Classes
                 logic.moduleManager.DeleteAllModules(obj);
                 logic.activeIds.Remove(obj.id);
                 logic.proceduralObjects.Remove(obj);
+                logic.InvalidCacheById(obj.id); // Caching Test
             }
             logic.groups.Remove(group);
         }
