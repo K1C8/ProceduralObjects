@@ -30,12 +30,39 @@ namespace ProceduralObjects.Classes
         }
         public static ProceduralObject GetObjectWithId(this List<ProceduralObject> list, int id)
         {
-            if (list.Any(po => po.id == id))
+            // Original implementation
+            //if (list.Any(po => po.id == id))
+            //{
+            //    return list.FirstOrDefault(po => po.id == id);
+            //}
+            //return null;
+
+            // Check cache first
+            var logic = ProceduralObjectsLogic.instance;
+            var cached = logic.GetCachedObjectById(id);
+            if (cached != null)
+                return cached;
+
+            // Fallback to slow search
+            for (int i = 0; i < list.Count; i++)
             {
-                return list.FirstOrDefault(po => po.id == id);
+                if (list[i].id == id)
+                {
+                    // logic._groupRootCache[id] = list[i]; // store for future lookups
+                    logic.AddObjectToCacheByListIndex(i);
+                    return list[i];
+                }
             }
+
             return null;
         }
+
+        public static void InvalidCacheOnObjectDelete(int id)
+        {
+            if 
+        }
+
+
         public static Vector2 WorldToGuiPoint(this Vector3 position)
         {
             var guiPosition = Camera.main.WorldToScreenPoint(position);

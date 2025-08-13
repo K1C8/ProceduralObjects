@@ -36,6 +36,7 @@ namespace ProceduralObjects.Classes
 
                 // Test version 241031 for draw mesh instancing tests
                 m_material = new Material(sourceProp.m_material); // Test version
+                Debug.Log("[ProceduralObjects] Task " + Task.CurrentId + " loading data from container.id: " + container.id + ". Container object name is " + _baseProp.name);
                 // m_material = sourceMaterial;  // Multithreaded version
                 m_material.enableInstancing = true;
                 ProceduralUtils.InitMeshAndVertices(container, sourceProp.m_material.name, sourceProp.m_mesh, this);
@@ -120,6 +121,7 @@ namespace ProceduralObjects.Classes
 
                 // Test version 241031
                 m_material = new Material(sourceProp.m_material); // Test version
+                Debug.Log("[ProceduralObjects] Task " + Task.CurrentId + " loading data from container.id: " + container.id + ". Container object name is " + _baseBuilding.name);
                 // m_material = sourceMaterial; // Multithreaded version
                 m_material.enableInstancing = true;  // Test version
 
@@ -166,7 +168,7 @@ namespace ProceduralObjects.Classes
             renderDistLocked = container.renderDistLocked;
 
             // Note: Following code needed to move into a separate pre/post-process function to avoid crashing MT process.
-            /*if (container.textParam != null)
+            if (container.textParam != null)
             {
                 meshStatus = 2;
                 m_textParameters = TextParameters.Clone(container.textParam, true);
@@ -186,7 +188,7 @@ namespace ProceduralObjects.Classes
                 originalTex.Apply();
                 m_material.mainTexture = m_textParameters.ApplyParameters(originalTex) as Texture;
             }
-            else*/
+            else
                 m_textParameters = null;
             // Note end.
 
@@ -214,7 +216,6 @@ namespace ProceduralObjects.Classes
             this.normalsRecalcMode = container.normalsRecalculation;
             this.flipFaces = container.flipFaces;
             this.disableCastShadows = container.disableCastShadows;
-            Debug.Log("[ProceduralObjects] Task " + Task.CurrentId + " loading data from container.id: " + container.id +". Container object name is " + _baseProp.name);
             if (this.flipFaces)
                VertexUtils.flipFaces(this);
             historyEditionBuffer = new HistoryBuffer(this);
