@@ -111,10 +111,10 @@ namespace ProceduralObjects
         private ConcurrentDictionary<int, Matrix4x4> overlayDict = new ConcurrentDictionary<int, Matrix4x4>();
         private MaterialPropertyBlock propertyBlock;
         //private Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]> equivalentDictCache;
-        private Dictionary<Mesh, Matrix4x4[]> equivalentTRSDictCache;
-        private Dictionary<Mesh, ShadowCastingMode[]> equivalentShadowCastingDictCache;
+        //private Dictionary<Mesh, Matrix4x4[]> equivalentTRSDictCache;
+        //private Dictionary<Mesh, ShadowCastingMode[]> equivalentShadowCastingDictCache;
         //private Dictionary<Mesh, Color[]> equivalentColorDictCache;
-        private Dictionary<Mesh, Vector4[]> equivalentColorDictCache;
+        //private Dictionary<Mesh, Vector4[]> equivalentColorDictCache;
         private Dictionary<Mesh, ComputeBuffer> equivalentPropertiesComputeBuffer;
         private Dictionary<Mesh, ComputeBuffer> equivalentArgsComputeBuffer;
 
@@ -239,9 +239,9 @@ namespace ProceduralObjects
             //propertyBlock.SetColor("_Color", Color.white);
 
 
-            equivalentTRSDictCache = new Dictionary<Mesh, Matrix4x4[]>();
-            equivalentShadowCastingDictCache = new Dictionary<Mesh, ShadowCastingMode[]>();
-            equivalentColorDictCache = new Dictionary<Mesh, Vector4[]>();
+            //equivalentTRSDictCache = new Dictionary<Mesh, Matrix4x4[]>();
+            //equivalentShadowCastingDictCache = new Dictionary<Mesh, ShadowCastingMode[]>();
+            //equivalentColorDictCache = new Dictionary<Mesh, Vector4[]>();
 
             Debug.Log(string.Format("[ProceduralObjects] Checking for compatibility, isGPUSupportInstancing: {0}, shaders contains testshaderind: {1}", isGPUSupportInstancing, loadedShaders.ContainsKey("Custom/ProceduralObject/Prop/testshaderind")));
 
@@ -382,14 +382,9 @@ namespace ProceduralObjects
 
             if (proceduralObjects != null && timeFromLastUpdate >= 100.0)
             {
-                //equivalentDict.Clear();
-                //equivalentMtlDict.Clear();
                 customDict.Clear();
                 overlayDict.Clear(); 
                 object dictLock = new object();
-
-                //int stepSize = 1000;
-                //List<Task> calcTasks = new List<Task>();
 
                 var sqrDynMinThreshold = ProceduralObjectsMod.DynamicRDMinThreshold.value * ProceduralObjectsMod.DynamicRDMinThreshold.value;
                 bool isNightTime = Singleton<SimulationManager>.instance.m_isNightTime;
@@ -399,12 +394,7 @@ namespace ProceduralObjects
                 loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testshaderind", out Shader instancedTestShader);
 
                 int maxThreadCound = Environment.ProcessorCount;
-                //Dictionary<Mesh, List<MeshProperties>>[] localEquivalent = new Dictionary<Mesh, List<MeshProperties>>[maxThreadCound];
-                //Dictionary<Mesh, Material>[] localMtl = new Dictionary<Mesh, Material>[maxThreadCound];
-
-                //var threadLocalEquivalent = new ThreadLocal<Dictionary<Mesh, List<MeshProperties>>>(() => new Dictionary<Mesh, List<MeshProperties>>());
-                //var threadLocalMtl = new ThreadLocal<Dictionary<Mesh, Material>>(() => new Dictionary<Mesh, Material>());
-                Debug.Log("[ProceduralObjects] Max thread count is " + maxThreadCound);
+                //Debug.Log("[ProceduralObjects] Max thread count is " + maxThreadCound);
 
                 Parallel.For(0, proceduralObjects.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCound }, () => new Dictionary<Mesh, List<MeshProperties>>(), 
                     (i, loop, localEquivalent) =>
@@ -508,29 +498,9 @@ namespace ProceduralObjects
                     }
                 });
 
-                //int partitionCount = (int)Math.Ceiling(proceduralObjects.Count / (double)stepSize);
-                //for (int i = 0; i < partitionCount; i++)
-                //{
-                //    int start = i * stepSize;
-                //    int end = (i + 1) * stepSize < proceduralObjects.Count ? (i + 1) * stepSize : proceduralObjects.Count;
-                //    Task t = new Task(() =>
-                //    {
-                //        UpdateWorkerFunc(start, end);
-                //    });
-                //    calcTasks.Add(t);
-                //    t.Start();
-                //}
-                
-                //Task.WaitAll(calcTasks.ToArray());
-
-                //equivalentDictCache.Clear();
-                equivalentTRSDictCache.Clear();
-                equivalentShadowCastingDictCache.Clear();
-                equivalentColorDictCache.Clear();
-
                 DateTime sortStartTime = DateTime.Now;
 
-                MeshProperties currItem;
+                //MeshProperties currItem;
 
                 foreach (var pair in equivalentDict)
                 {
@@ -560,13 +530,15 @@ namespace ProceduralObjects
                     args[2] = pair.Key.GetIndexStart(0);
 
                     ComputeBuffer meshPropertiesBuffer = equivalentPropertiesComputeBuffer[pair.Key];
-                    MeshProperties[] propertiesArray = new MeshProperties[size];
+                    //MeshProperties[] propertiesArray = new MeshProperties[size];
 
-                    for (int i = 0; i < size; i++)
-                    {
-                        currItem = pair.Value[i];
-                        propertiesArray[i] = currItem;
-                    }
+                    //for (int i = 0; i < size; i++)
+                    //{
+                    //    currItem = pair.Value[i];
+                    //    propertiesArray[i] = currItem;
+                    //}
+
+                    MeshProperties[] propertiesArray = pair.Value.ToArray();
 
                     pair.Value.Clear();
 
@@ -671,24 +643,6 @@ namespace ProceduralObjects
                         ComputeBuffer argsBuffer = equivalentArgsComputeBuffer[pair.Key];
                         ComputeBuffer meshPropertiesBuffer = equivalentPropertiesComputeBuffer[pair.Key];
 
-                        //args[0] = (pair.Key != null) ? pair.Key.GetIndexCount(0) : 0;
-                        //args[1] = (uint)pair.Value.Length;
-                        //args[2] = pair.Key.GetIndexStart(0);
-                        //argsBuffer.SetData(args);
-
-                        //MeshProperties[] propertiesArray = new MeshProperties[pair.Value.Length];
-                        //for (int i = 0; i < pair.Value.Length; i++)
-                        //{
-                        //    MeshProperties property = new MeshProperties
-                        //    {
-                        //        position = pair.Value[i],
-                        //        castShadow = equivalentShadowCastingDictCache[pair.Key][i] == ShadowCastingMode.On ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0),
-                        //        color = equivalentColorDictCache[pair.Key][i]
-                        //    };
-                        //    propertiesArray[i] = property;
-                        //}
-
-                        //meshPropertiesBuffer.SetData(propertiesArray);
                         propertyBlock.SetBuffer("_Properties", meshPropertiesBuffer);
                         try
                         {
