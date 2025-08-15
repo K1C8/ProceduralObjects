@@ -100,9 +100,11 @@ namespace ProceduralObjects
 
         private bool isGPUSupportInstancing = false;
         private Dictionary<string, Shader> loadedShaders = ProceduralUtils.LoadShader();
+        private int maxThreadCound = Environment.ProcessorCount;
         private int frameCount;
         private double poCalcTimeSum;
         private double poDrawMeshTimeSum;
+        private double poUpdateTimeSum;
         private DateTime lastRenderTime;
         private ConcurrentDictionary<Mesh, List<MeshProperties>> equivalentDict
                     = new ConcurrentDictionary<Mesh, List<MeshProperties>>();
@@ -293,6 +295,7 @@ namespace ProceduralObjects
 
         void Update()
         {
+            DateTime updateStart = DateTime.Now;
             // Cloning for Move It
             if (PO_MoveIt.queuedCloning.Count > 0)
             {
@@ -393,10 +396,10 @@ namespace ProceduralObjects
 
                 loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testshaderind", out Shader instancedTestShader);
 
-                int maxThreadCound = Environment.ProcessorCount;
                 //Debug.Log("[ProceduralObjects] Max thread count is " + maxThreadCound);
 
-                Parallel.For(0, proceduralObjects.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCound }, () => new Dictionary<Mesh, List<MeshProperties>>(), 
+                Parallel.For(0, proceduralObjects.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCound < 48 ? maxThreadCound : 48 }, 
+                    () => HelperPool.GetMeshMeshPropDict(), //new Dictionary<Mesh, List<MeshProperties>>(), 
                     (i, loop, localEquivalent) =>
                 {
                     //int tid = Thread.CurrentThread.ManagedThreadId % maxThreadCound;
@@ -478,7 +481,7 @@ namespace ProceduralObjects
                 {
                     if (localEquivalent == null) return;
 
-                    int tid = Thread.CurrentThread.ManagedThreadId;
+                    //int tid = Thread.CurrentThread.ManagedThreadId;
                     lock (dictLock)
                     {
                         foreach (var kv in localEquivalent)
@@ -494,8 +497,9 @@ namespace ProceduralObjects
                             }
                             //Debug.Log($"[ProceduralObjects] Processing result from thread {tid}, current list {kv.Key.name} with {kv.Value.Count} instances. List length {existing.Count}");
                         }
-
                     }
+
+                    HelperPool.ReturnMeshMeshPropDict(localEquivalent);
                 });
 
                 DateTime sortStartTime = DateTime.Now;
@@ -676,16 +680,6 @@ namespace ProceduralObjects
 
                 var poDrawMeshTime = Math.Round((DateTime.Now - startTime).TotalMilliseconds, 2) - poCalcTime;
                 poDrawMeshTimeSum += poDrawMeshTime;
-
-                if (frameCount == 1000)
-                {
-                    Debug.Log("[ProceduralObjects] In the most recent 1000 frames, calculating positions of Procedural Objects consumed " + Math.Round(poCalcTimeSum / 1000, 2) + " milliseconds per frame, " 
-                        + "invoking DrawMesh for Procedural Objects consumed " + Math.Round(poDrawMeshTimeSum / 1000, 2) + " milliseconds per frame.");
-                    frameCount = 0;
-                    poCalcTimeSum = 0.0;
-                    poDrawMeshTimeSum = 0.0;
-                }
-
 
                 if (moduleManager.enabledModules.Count > 0)
                 {
@@ -2280,6 +2274,20 @@ namespace ProceduralObjects
                 }
             }
             previousToolType = ToolsModifierControl.toolController.CurrentTool.GetType();
+
+            // Performance metrics
+            poUpdateTimeSum += Math.Round((DateTime.Now - updateStart).TotalMilliseconds, 2);
+
+            if (frameCount == 1000)
+            {
+                Debug.Log($"[ProceduralObjects] In the most recent 1000 frames, calculating positions of Procedural Objects consumed {Math.Round(poCalcTimeSum / 1000, 2)} ms per frame, "
+                    + $"invoking DrawMesh for Procedural Objects consumed {Math.Round(poDrawMeshTimeSum / 1000, 2)} ms per frame. Total update time per frame is {Math.Round(poUpdateTimeSum / 1000, 2)} ms.");
+                frameCount = 0;
+                poCalcTimeSum = 0.0;
+                poDrawMeshTimeSum = 0.0;
+                poUpdateTimeSum = 0.0;
+            }
+
         }
 
 
@@ -4524,7 +4532,7 @@ namespace ProceduralObjects
             }
         }
 
-        private struct MeshProperties
+        public struct MeshProperties
         {
             public Matrix4x4 position;
             public Vector4 color;
