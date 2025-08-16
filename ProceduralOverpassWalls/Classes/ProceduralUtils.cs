@@ -733,7 +733,7 @@ namespace ProceduralObjects.Classes
 
         public static void InitMeshAndVertices(ProceduralObjectContainer container, string sourceMaterialName, Mesh sourceMesh, ProceduralObject target) 
         {
-            if (container.meshStatus == 0 && container.vertices != null)
+            if ((container.meshStatus == 0 || (container.meshStatus == 2 && !container.hasCustomTexture && container.textParam == null)) && container.vertices != null)
             {
                 // CHECK FOR MESH REPETITION
                 if (CheckMeshEquivalence(container.vertices, sourceMesh.vertices))
