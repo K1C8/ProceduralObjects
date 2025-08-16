@@ -9,6 +9,7 @@ using UnityEngine;
 
 using ProceduralObjects.Classes;
 using ProceduralObjects.ProceduralText;
+using ProtoBuf;
 
 namespace ProceduralObjects
 {
@@ -311,10 +312,14 @@ namespace ProceduralObjects
             }
         }
     }
+
+    [ProtoContract]
     [Serializable]
     public class SerializableVector3
     {
-        public float x, y, z;
+        [ProtoMember(1)] public float x;
+        [ProtoMember(2)] public float y;
+        [ProtoMember(3)] public float z;
         public SerializableVector3() { }
         public SerializableVector3(Vector3 source)
         {

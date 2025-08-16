@@ -100,7 +100,7 @@ namespace ProceduralObjects
 
         private bool isGPUSupportInstancing = false;
         private Dictionary<string, Shader> loadedShaders = ProceduralUtils.LoadShader();
-        private int maxThreadCound = Environment.ProcessorCount;
+        private int maxThreadCount;
         private int frameCount;
         private double poCalcTimeSum;
         private double poDrawMeshTimeSum;
@@ -251,6 +251,14 @@ namespace ProceduralObjects
 
             if (isGPUSupportInstancing && proceduralObjects != null && loadedShaders.ContainsKey("Custom/ProceduralObject/Prop/testshaderind"))
             {
+                if (SystemInfo.processorType.Contains("Intel"))
+                {
+                    maxThreadCount = Environment.ProcessorCount <= 8 ? Environment.ProcessorCount : 8;
+                }
+                else
+                {
+                    maxThreadCount = Environment.ProcessorCount <= 64 ? Environment.ProcessorCount : 64;
+                }
                 //string instancingKeyword = "INSTANCING_ON";
                 string shadeCastingKeyword = "SHADOWS_SCREEN";
                 equivalentPropertiesComputeBuffer = new Dictionary<Mesh, ComputeBuffer>();
@@ -383,7 +391,7 @@ namespace ProceduralObjects
             var startTime = DateTime.Now;
             var timeFromLastUpdate = Math.Round((DateTime.Now - lastRenderTime).TotalMilliseconds, 2);
 
-            if (proceduralObjects != null && timeFromLastUpdate >= 100.0)
+            if (proceduralObjects != null)// && timeFromLastUpdate >= 100.0)
             {
                 customDict.Clear();
                 overlayDict.Clear(); 
@@ -396,13 +404,22 @@ namespace ProceduralObjects
 
                 loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testshaderind", out Shader instancedTestShader);
 
-                //Debug.Log("[ProceduralObjects] Max thread count is " + maxThreadCound);
+                //Debug.Log("[ProceduralObjects] Max thread count is " + maxThreadCount);
+                // Small test for streaming mesh
+                //int luckyPO = UnityEngine.Random.Range(0, proceduralObjects.Count - 2);
+                //Vector3[] vector3s = proceduralObjects[luckyPO].m_mesh.vertices;
+                //MemoryStream stream = new MemoryStream();
+                //Serializer.Serialize(stream, SerializableVector3.ToSerializableArray(vector3s));
+                //stream.Position = 0;
+                //string testString = Encoding.UTF8.GetString(stream.ToArray());
+                //Debug.Log($"[ProceduralObjects] Lucky PO vertices converted to string as: {testString}");
 
-                Parallel.For(0, proceduralObjects.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCound < 48 ? maxThreadCound : 48 }, 
+
+                Parallel.For(0, proceduralObjects.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCount }, 
                     () => HelperPool.GetMeshMeshPropDict(), //new Dictionary<Mesh, List<MeshProperties>>(), 
                     (i, loop, localEquivalent) =>
                 {
-                    //int tid = Thread.CurrentThread.ManagedThreadId % maxThreadCound;
+                    //int tid = Thread.CurrentThread.ManagedThreadId % maxThreadCount;
 
                     var obj = proceduralObjects[(int)i];
                     if (obj.layer != null && obj.layer.m_isHidden)
@@ -435,32 +452,33 @@ namespace ProceduralObjects
                     else
                         obj._insideUIview = false;
 
+                    if (!RenderOptions.instance.CanRenderSingle(obj, isNightTime))
+                        return localEquivalent;
+
                     try
                     {
                         Matrix4x4 m4x4 = Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one);
-                        if (RenderOptions.instance.CanRenderSingle(obj, isNightTime))
+                        // For test only, material differences like custom texts/rects are not yet considered, they are put into render pipe in the default way.
+                        if (obj.meshStatus == 1 && obj.m_material.shader == instancedTestShader && obj.m_textParameters == null && obj.customTexture == null)
                         {
-                            // For test only, material differences like custom texts/rects are not yet considered.
-                            //if (obj.meshStatus == 2 || !obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testshaderind"))
-                            if (obj.meshStatus == 2 || obj.m_material.shader != instancedTestShader || obj.m_textParameters != null || obj.customTexture != null)
+                            var item = new MeshProperties(m4x4, obj.disableCastShadows ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0), obj.m_color);
+
+                            if (!localEquivalent.TryGetValue(obj.m_mesh, out var list))
                             {
-                                //customDict.GetOrAdd(i, m4x4);
-                                customDict[(int)i] = m4x4;
+                                //list = new List<MeshProperties>();
+                                list = HelperPool.GetMeshPropsList();
+                                localEquivalent[obj.m_mesh] = list;
                             }
-                            //else if (obj.meshStatus == 1 && obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testshaderind"))
-                            else if (obj.meshStatus == 1 && obj.m_material.shader == instancedTestShader)
-                            {
-                                var item = new MeshProperties(m4x4, obj.disableCastShadows ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0), obj.m_color);
-                                
-                                if (!localEquivalent.TryGetValue(obj.m_mesh, out var list))
-                                {
-                                    list = new List<MeshProperties>();
-                                    localEquivalent[obj.m_mesh] = list;
-                                }
-                                list.Add(item);
-                                equivalentMtlDict.GetOrAdd(obj.m_mesh, obj.m_material);
-                            }
+                            list.Add(item);
+                            equivalentMtlDict.GetOrAdd(obj.m_mesh, obj.m_material);
                         }
+                        //else if (obj.meshStatus == 2 || !obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testshaderind"))
+                        else // (obj.meshStatus == 2 || obj.m_material.shader != instancedTestShader || obj.m_textParameters != null || obj.customTexture != null)
+                        {
+                            //customDict.GetOrAdd(i, m4x4);
+                            customDict[(int)i] = m4x4;
+                        }
+                        //else if (obj.meshStatus == 1 && obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testshaderind"))
 
                         if (SingleHoveredObj == obj || (selectedGroup == null ? (obj.group == null ? false : obj.group.root == SingleHoveredObj) : false))
                             //overlayDict.GetOrAdd(i, m4x4);
@@ -486,15 +504,15 @@ namespace ProceduralObjects
                     {
                         foreach (var kv in localEquivalent)
                         {
+                            if (kv.Key == null || kv.Value == null)
+                                continue;
                             if (!equivalentDict.TryGetValue(kv.Key, out var existing))
                             {
-                                equivalentDict[kv.Key] = kv.Value;
+                                existing = new List<MeshProperties>(kv.Value.Count);
+                                equivalentDict[kv.Key] = existing;
                             }
-                            else
-                            {
-                                if (kv.Value != null && kv.Value.Count > 0)
-                                    existing.AddRange(kv.Value);
-                            }
+                            if (kv.Value.Count > 0)
+                                existing.AddRange(kv.Value);
                             //Debug.Log($"[ProceduralObjects] Processing result from thread {tid}, current list {kv.Key.name} with {kv.Value.Count} instances. List length {existing.Count}");
                         }
                     }
