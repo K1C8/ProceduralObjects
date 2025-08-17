@@ -74,6 +74,8 @@
     <Compile Include="Classes\MaterialOptions.cs" />
     <Compile Include="Classes\MeasurementsManager.cs" />
     <Compile Include="Classes\POGroup.cs" />
+    <Compile Include="Classes\Quad.cs" />
+    <Compile Include="Classes\QuadTree.cs" />
     <Compile Include="Classes\RenderOptions.cs" />
     <Compile Include="Classes\StatisticsManager.cs" />
     <Compile Include="ProceduralModules\ModuleManager.cs" />
