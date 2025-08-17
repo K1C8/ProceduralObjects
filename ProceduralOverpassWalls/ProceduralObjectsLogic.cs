@@ -109,8 +109,8 @@ namespace ProceduralObjects
         private ConcurrentDictionary<Mesh, List<MeshProperties>> equivalentDict
                     = new ConcurrentDictionary<Mesh, List<MeshProperties>>();
         private ConcurrentDictionary<Mesh, Material> equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
-        private ConcurrentDictionary<int, Matrix4x4> customDict = new ConcurrentDictionary<int, Matrix4x4>();
-        private ConcurrentDictionary<int, Matrix4x4> overlayDict = new ConcurrentDictionary<int, Matrix4x4>();
+        private List<int> customList = new List<int>();
+        //private List<int> overlayList = new List<int>();
         private MaterialPropertyBlock propertyBlock;
         //private Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]> equivalentDictCache;
         //private Dictionary<Mesh, Matrix4x4[]> equivalentTRSDictCache;
@@ -235,8 +235,8 @@ namespace ProceduralObjects
             equivalentDict = new ConcurrentDictionary<Mesh, List<MeshProperties>>();
             //equivalentDictCache = new Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]>();
             equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
-            customDict = new ConcurrentDictionary<int, Matrix4x4>();
-            overlayDict = new ConcurrentDictionary<int, Matrix4x4>();
+            customList = new List<int>();
+            //overlayList = new List<int>();
             propertyBlock = new MaterialPropertyBlock();
             //propertyBlock.SetColor("_Color", Color.white);
 
@@ -253,7 +253,7 @@ namespace ProceduralObjects
             {
                 if (SystemInfo.processorType.Contains("Intel"))
                 {
-                    maxThreadCount = Environment.ProcessorCount <= 8 ? Environment.ProcessorCount : 8;
+                    maxThreadCount = Environment.ProcessorCount <= 16 ? Environment.ProcessorCount : 16;
                 }
                 else
                 {
@@ -391,11 +391,12 @@ namespace ProceduralObjects
             var startTime = DateTime.Now;
             var timeFromLastUpdate = Math.Round((DateTime.Now - lastRenderTime).TotalMilliseconds, 2);
 
-            if (proceduralObjects != null)// && timeFromLastUpdate >= 100.0)
+            if (proceduralObjects != null && timeFromLastUpdate >= 50.0)
             {
-                customDict.Clear();
-                overlayDict.Clear(); 
+                customList.Clear();
+                //overlayList.Clear(); 
                 object dictLock = new object();
+                object listLock = new object();
 
                 var sqrDynMinThreshold = ProceduralObjectsMod.DynamicRDMinThreshold.value * ProceduralObjectsMod.DynamicRDMinThreshold.value;
                 bool isNightTime = Singleton<SimulationManager>.instance.m_isNightTime;
@@ -416,14 +417,17 @@ namespace ProceduralObjects
 
 
                 Parallel.For(0, proceduralObjects.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCount }, 
-                    () => HelperPool.GetMeshMeshPropDict(), //new Dictionary<Mesh, List<MeshProperties>>(), 
-                    (i, loop, localEquivalent) =>
+                    () => 
+                    {
+                        return new SortingLists(HelperPool.GetMeshMeshPropDict(), HelperPool.GetCustomList());
+                    }, //new Dictionary<Mesh, List<MeshProperties>>(), 
+                    (i, loop, localLists) =>
                 {
                     //int tid = Thread.CurrentThread.ManagedThreadId % maxThreadCount;
 
                     var obj = proceduralObjects[(int)i];
                     if (obj.layer != null && obj.layer.m_isHidden)
-                        return localEquivalent;
+                        return localLists;
 
                     bool infiniteDist = obj.renderDistance >= 16001;
                     obj._squareDistToCam = (camPos - obj.m_position).sqrMagnitude;
@@ -443,7 +447,7 @@ namespace ProceduralObjects
                     if (!obj._insideRenderView)
                     {
                         obj._insideUIview = false;
-                        return localEquivalent;
+                        return localLists;
                     }
 
                     Vector3 screenPoint = cam.WorldToScreenPoint(obj.m_position);
@@ -453,36 +457,36 @@ namespace ProceduralObjects
                         obj._insideUIview = false;
 
                     if (!RenderOptions.instance.CanRenderSingle(obj, isNightTime))
-                        return localEquivalent;
+                        return localLists;
 
                     try
                     {
-                        Matrix4x4 m4x4 = Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one);
                         // For test only, material differences like custom texts/rects are not yet considered, they are put into render pipe in the default way.
                         if (obj.meshStatus == 1 && obj.m_material.shader == instancedTestShader && obj.m_textParameters == null && obj.customTexture == null)
                         {
+                            Matrix4x4 m4x4 = Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one);
                             var item = new MeshProperties(m4x4, obj.disableCastShadows ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0), obj.m_color);
 
-                            if (!localEquivalent.TryGetValue(obj.m_mesh, out var list))
+                            if (!localLists.localBatchDict.TryGetValue(obj.m_mesh, out var list))
                             {
                                 //list = new List<MeshProperties>();
                                 list = HelperPool.GetMeshPropsList();
-                                localEquivalent[obj.m_mesh] = list;
+                                localLists.localBatchDict[obj.m_mesh] = list;
                             }
                             list.Add(item);
                             equivalentMtlDict.GetOrAdd(obj.m_mesh, obj.m_material);
                         }
-                        //else if (obj.meshStatus == 2 || !obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testshaderind"))
                         else // (obj.meshStatus == 2 || obj.m_material.shader != instancedTestShader || obj.m_textParameters != null || obj.customTexture != null)
                         {
                             //customDict.GetOrAdd(i, m4x4);
-                            customDict[(int)i] = m4x4;
+                            localLists.localCustomList.Add(i);
                         }
-                        //else if (obj.meshStatus == 1 && obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testshaderind"))
 
-                        if (SingleHoveredObj == obj || (selectedGroup == null ? (obj.group == null ? false : obj.group.root == SingleHoveredObj) : false))
-                            //overlayDict.GetOrAdd(i, m4x4);
-                            overlayDict[(int)i] = m4x4;
+                        //if (SingleHoveredObj == obj || (selectedGroup == null ? (obj.group == null ? false : obj.group.root == SingleHoveredObj) : false))
+                        //if (SingleHoveredObj == obj || (selectedGroup == null && obj.group != null && obj.group.root == SingleHoveredObj))
+                        //    //overlayDict.GetOrAdd(i, m4x4);
+                        //    overlayList[(int)i] = m4x4;
+
                     }
                     catch (Exception e)
                     {
@@ -494,15 +498,12 @@ namespace ProceduralObjects
                             (renderCamera == null).ToString());
                     }
 
-                    return localEquivalent;
-                }, localEquivalent =>
+                    return localLists;
+                }, localLists =>
                 {
-                    if (localEquivalent == null) return;
-
-                    //int tid = Thread.CurrentThread.ManagedThreadId;
                     lock (dictLock)
                     {
-                        foreach (var kv in localEquivalent)
+                        foreach (var kv in localLists.localBatchDict)
                         {
                             if (kv.Key == null || kv.Value == null)
                                 continue;
@@ -516,8 +517,16 @@ namespace ProceduralObjects
                             //Debug.Log($"[ProceduralObjects] Processing result from thread {tid}, current list {kv.Key.name} with {kv.Value.Count} instances. List length {existing.Count}");
                         }
                     }
+                    if (localLists.localCustomList.Count > 0)
+                    {
+                        lock (listLock)
+                        {
+                            customList.AddRange(localLists.localCustomList);
+                        }
+                    }
 
-                    HelperPool.ReturnMeshMeshPropDict(localEquivalent);
+                    HelperPool.ReturnMeshMeshPropDict(localLists.localBatchDict);
+                    HelperPool.ReturnCustomList(localLists.localCustomList);
                 });
 
                 DateTime sortStartTime = DateTime.Now;
@@ -679,17 +688,52 @@ namespace ProceduralObjects
                         //Debug.Log(string.Format("[ProceduralObjects] Mesh {0} count observed is {1}.", pair.Key.name, pair.Value.Length));
                     }
 
-                    foreach (var pair in customDict)
+                    foreach (var index in customList)
                     {
-                        Graphics.DrawMesh(proceduralObjects[pair.Key].m_mesh, pair.Value, proceduralObjects[pair.Key].m_material, 0);
+                        Graphics.DrawMesh(proceduralObjects[index].m_mesh, proceduralObjects[index].m_position, proceduralObjects[index].m_rotation,
+                            proceduralObjects[index].m_material, 0, null, 0, null, !proceduralObjects[index].disableCastShadows, true);
                     }
 
-                    foreach (var pair in overlayDict)
+                    void processingHoveredOverlay()
                     {
-                        Graphics.DrawMesh(proceduralObjects[pair.Key].overlayRenderMesh, pair.Value,
-                            selectedGroup == null ? (SingleHoveredObj.isRootOfGroup ? redOverlayMat : purpleOverlayMat) : purpleOverlayMat,
-                            0, null, 0, null, false, false);
+                        // If the user is hovering on single ungroupped object, or single object in a group when a group is selected, overlay it with purple.
+                        // If the user is hovering on the root of a group, overlay the group with red.
+                        if (SingleHoveredObj == null)
+                            return;
+                        //if (SingleHoveredObj == obj || (selectedGroup == null && (obj.group != null && obj.group.root == SingleHoveredObj)))
+                        //    Graphics.DrawMesh(obj.overlayRenderMesh, obj.m_position, obj.m_rotation,
+                        //        selectedGroup == null ? (SingleHoveredObj.isRootOfGroup ? redOverlayMat : purpleOverlayMat) : purpleOverlayMat,
+                        //        0, null, 0, null, false, false);
+                        if (selectedGroup == null)
+                        {
+                            foreach (var group in groups)
+                            {
+                                // Skip all groups that their roots are not being hovered on.
+                                if (group.root != SingleHoveredObj)
+                                    continue;
+                                // Process the group that its root is being hovered on, overlay with red.
+                                foreach (var obj in group.objects)
+                                {
+                                    Graphics.DrawMesh(obj.overlayRenderMesh, obj.m_position, obj.m_rotation, redOverlayMat, 0, null, 0, null, false, false);
+                                }
+                                // If the code goes here, that means a group root is hovered on and the overlay of the group is rendered, the process is finish.
+                                // PO only have one object being hovered on at any given time, by my observation. --ccy 25/08/16
+                                return;
+                            }
+                            // If the code reaches here, then no group roots are being hovered on, while there is an non-null SingleHoveredObject.
+                            Graphics.DrawMesh(SingleHoveredObj.overlayRenderMesh, SingleHoveredObj.m_position, SingleHoveredObj.m_rotation, purpleOverlayMat,
+                                0, null, 0, null, false, false);
+                            return;
+                        }
+                        else
+                        {
+                            // We need to render the object hovered in a selected group in red here.
+                            Graphics.DrawMesh(SingleHoveredObj.overlayRenderMesh, SingleHoveredObj.m_position, SingleHoveredObj.m_rotation, purpleOverlayMat,
+                                0, null, 0, null, false, false);
+                        }
                     }
+
+                    processingHoveredOverlay();
                 }
                 catch (Exception e)
                 {
@@ -4547,6 +4591,18 @@ namespace ProceduralObjects
             if (_groupRootCache.ContainsKey(id)) 
             {
                 _groupRootCache.Remove(id);
+            }
+        }
+
+        public struct SortingLists
+        {
+            public Dictionary<Mesh, List<MeshProperties>> localBatchDict;
+            public List<int> localCustomList;
+
+            public SortingLists(Dictionary<Mesh, List<MeshProperties>> dict,  List<int> list)
+            {
+                localBatchDict = dict;
+                localCustomList = list;
             }
         }
 

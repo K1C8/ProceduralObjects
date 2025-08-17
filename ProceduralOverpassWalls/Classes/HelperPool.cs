@@ -11,9 +11,11 @@ namespace ProceduralObjects.Classes
     internal static class HelperPool
     {
         static readonly Stack<Dictionary<Mesh, List<MeshProperties>>> dictionaryPool = new Stack<Dictionary<Mesh, List<MeshProperties>>>(50);
+        static readonly Stack<List<int>> customListPool = new Stack<List<int>>(50);
         static readonly ThreadLocal<Stack<List<MeshProperties>>> localMeshPropsPool = new ThreadLocal<Stack<List<MeshProperties>>>(() => new Stack<List<MeshProperties>>(8));
 
         private static readonly object dictLock = new object();
+        private static readonly object customListLock = new object();
 
         public static Dictionary<Mesh, List<MeshProperties>> GetMeshMeshPropDict()
         {
@@ -47,6 +49,23 @@ namespace ProceduralObjects.Classes
         {
             list.Clear();
             localMeshPropsPool.Value.Push(list);
+        }
+
+        public static List<int> GetCustomList()
+        {
+            lock (customListLock)
+            {
+                return customListPool.Count > 0 ? customListPool.Pop() : new List<int>();
+            }
+        }
+
+        public static void ReturnCustomList(List<int> list)
+        {
+            lock (customListLock)
+            {
+                list.Clear();
+                customListPool.Push(list);
+            }
         }
     }
 }
