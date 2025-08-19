@@ -61,9 +61,9 @@ namespace ProceduralObjects.Classes
 
         public static void ReturnCustomList(List<int> list)
         {
+            list.Clear();
             lock (customListLock)
             {
-                list.Clear();
                 customListPool.Push(list);
             }
         }

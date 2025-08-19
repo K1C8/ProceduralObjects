@@ -358,10 +358,15 @@ namespace ProceduralObjects
             return new Vector3(value.x, value.y, value.z);
         }
     }
+
+    [ProtoContract]
     [Serializable]
     public class SerializableQuaternion
     {
-        public float x, y, z, w;
+        [ProtoMember(1)] public float x;
+        [ProtoMember(2)] public float y;
+        [ProtoMember(3)] public float z;
+        [ProtoMember(4)] public float w;
         public SerializableQuaternion() { }
         public SerializableQuaternion(Quaternion source)
         {
@@ -372,10 +377,14 @@ namespace ProceduralObjects
         }
     }
 
+    [ProtoContract]
     [Serializable]
     public class SerializableColor
     {
-        public float r, g, b, a;
+        [ProtoMember(1)] public float r;
+        [ProtoMember(2)] public float g;
+        [ProtoMember(3)] public float b;
+        [ProtoMember(4)] public float a;
         public SerializableColor() { }
         public SerializableColor(SerializableColor c)
         {
