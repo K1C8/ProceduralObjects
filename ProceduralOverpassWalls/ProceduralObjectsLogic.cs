@@ -119,6 +119,7 @@ namespace ProceduralObjects
         //private Dictionary<Mesh, Vector4[]> equivalentColorDictCache;
         private Dictionary<Mesh, ComputeBuffer> equivalentPropertiesComputeBuffer;
         private Dictionary<Mesh, ComputeBuffer> equivalentArgsComputeBuffer;
+        private QuadTree quadTree;
 
         //private ComputeBuffer[] argsBufferArray;
         //private ComputeBuffer meshPropertiesBuffer;
@@ -211,6 +212,11 @@ namespace ProceduralObjects
             }
             double layerAndContainerLoadingTime = Math.Round((DateTime.Now - layerAndContainerLoadStartTime).TotalSeconds, 2);
             Debug.Log("[ProceduralObjects] Layers and PO data loaded in " + layerAndContainerLoadingTime + " seconds");
+
+            DateTime staticsStart = DateTime.Now;
+            quadTree = new QuadTree(7); //, proceduralObjects);
+            double staticsTime = Math.Round((DateTime.Now - staticsStart).TotalMilliseconds, 2);
+            Debug.Log("[ProceduralObjects] Building QuadTree and checking potential batchable modified object in " + fontAndMiscGUILoadingTime + " milliseconds");
 
             new POStatisticsManager(this);
             ProceduralTool.CreateCursors();
@@ -390,6 +396,21 @@ namespace ProceduralObjects
             frameCount++;
             var startTime = DateTime.Now;
             var timeFromLastUpdate = Math.Round((DateTime.Now - lastRenderTime).TotalMilliseconds, 2);
+
+            quadTree.DrawQuadBounds();
+            List<Quad> leafQuads = quadTree.GetLeafQuads();
+            StringBuilder sb = new StringBuilder().Append("[ProceduralObjects] Visible leaf Quads in QuadTree are: ");
+            Plane[] frustum = GeometryUtility.CalculateFrustumPlanes(renderCamera);
+            List<int> visiblePoSeqList = new List<int>();
+            foreach (Quad quad in leafQuads)
+            {
+                if (GeometryUtility.TestPlanesAABB(frustum, quad.bounds))
+                {
+                    sb.Append($"Quad {quad.bounds.center}, ");
+                    visiblePoSeqList.AddRange(quad.allPoIdList);
+                }
+            }
+            Debug.Log(sb.ToString());
 
             if (proceduralObjects != null && timeFromLastUpdate >= 50.0)
             {
@@ -694,7 +715,7 @@ namespace ProceduralObjects
                             proceduralObjects[index].m_material, 0, null, 0, null, !proceduralObjects[index].disableCastShadows, true);
                     }
 
-                    void processingHoveredOverlay()
+                    void processHoveredOverlay()
                     {
                         // If the user is hovering on single ungroupped object, or single object in a group when a group is selected, overlay it with purple.
                         // If the user is hovering on the root of a group, overlay the group with red.
@@ -733,7 +754,7 @@ namespace ProceduralObjects
                         }
                     }
 
-                    processingHoveredOverlay();
+                    processHoveredOverlay();
                 }
                 catch (Exception e)
                 {
@@ -2350,6 +2371,8 @@ namespace ProceduralObjects
                 poUpdateTimeSum = 0.0;
             }
 
+            visiblePoSeqList.Clear();
+            leafQuads.Clear();
         }
 
 

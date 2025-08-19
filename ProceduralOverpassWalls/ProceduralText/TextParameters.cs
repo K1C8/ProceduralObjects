@@ -7,9 +7,11 @@ using UnityEngine;
 using ProceduralObjects.Classes;
 using ProceduralObjects.Localization;
 using ProceduralObjects.UI;
+using ProtoBuf;
 
 namespace ProceduralObjects.ProceduralText
 {
+    [ProtoContract]
     [Serializable]
     public class TextParameters
     {
@@ -18,7 +20,7 @@ namespace ProceduralObjects.ProceduralText
             m_textFields = new List<TextField>();
         }
 
-        public List<TextField> m_textFields;
+        [ProtoMember(1)] public List<TextField> m_textFields;
 
         public TextField this[int index]
         {
@@ -162,6 +164,7 @@ namespace ProceduralObjects.ProceduralText
         }
     }
 
+    [ProtoContract]
     [Serializable]
     public class TextField
     {
@@ -181,14 +184,24 @@ namespace ProceduralObjects.ProceduralText
             locked = false;
         }
 
-        public string m_text, m_fontName;
-        public uint m_spacing, m_fontSize, m_width, m_height, borderSize;
-        public byte m_rotation, m_type;
-        public FontStyle m_style;
-        public float x, y, m_scaleX, m_scaleY;
+        [ProtoMember(1)] public string m_text;
+        [ProtoMember(2)] public string m_fontName;
+        [ProtoMember(3)] public uint m_spacing;
+        [ProtoMember(4)] public uint m_fontSize; 
+        [ProtoMember(5)] public uint m_width; 
+        [ProtoMember(6)] public uint m_height; 
+        [ProtoMember(7)] public uint borderSize;
+        [ProtoMember(8)] public byte m_rotation;
+        [ProtoMember(9)] public byte m_type;
+        [ProtoMember(10)] public FontStyle m_style;
+        [ProtoMember(11)] public float x;
+        [ProtoMember(12)] public float y;
+        [ProtoMember(13)] public float m_scaleX;
+        [ProtoMember(14)] public float m_scaleY;
         // formerly used as a 4 components item (RGBA), only for serialization
-        public SerializableQuaternion serializableColor;
-        public SerializableColor m_fontColor, borderColor;
+        [ProtoMember(15)] public SerializableQuaternion serializableColor;
+        [ProtoMember(16)] public SerializableColor m_fontColor;
+        [ProtoMember(17)] public SerializableColor borderColor;
         [NonSerialized]
         public TextureFont m_font;
         [NonSerialized]

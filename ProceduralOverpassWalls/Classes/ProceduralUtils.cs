@@ -495,6 +495,21 @@ namespace ProceduralObjects.Classes
             // return true if everything is equivalent
             return true;
         } 
+
+        public static bool CheckMeshEquivalance(Vector3[] thisVertices, Vector3[] otherVertices)
+        {
+            if (thisVertices == null || otherVertices == null) return false;
+
+            if (thisVertices.Length != otherVertices.Length) return false;
+
+            for (int i = 0;i < thisVertices.Length;i++)
+            {
+                if (thisVertices[i] != otherVertices[i]) return false;
+            }
+
+            return true;
+        }
+
         public static void ResetOriginalMesh(this ProceduralObject obj)
         {
             var originalVertices = (obj.baseInfoType == "PROP") ? obj._baseProp.m_mesh.vertices : obj._baseBuilding.m_mesh.vertices;
