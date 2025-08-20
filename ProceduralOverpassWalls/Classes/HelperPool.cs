@@ -10,22 +10,24 @@ namespace ProceduralObjects.Classes
 {
     internal static class HelperPool
     {
-        static readonly Stack<Dictionary<Mesh, List<MeshProperties>>> dictionaryPool = new Stack<Dictionary<Mesh, List<MeshProperties>>>(50);
-        static readonly Stack<List<int>> customListPool = new Stack<List<int>>(50);
+        static readonly Stack<Dictionary<int, List<MeshProperties>>> dictionaryPool = new Stack<Dictionary<int, List<MeshProperties>>>(32);
+        static readonly Stack<List<int>> customListPool = new Stack<List<int>>(32);
+        static readonly Stack<HashSet<int>> visibilitySetPool = new Stack<HashSet<int>>(32);
         static readonly ThreadLocal<Stack<List<MeshProperties>>> localMeshPropsPool = new ThreadLocal<Stack<List<MeshProperties>>>(() => new Stack<List<MeshProperties>>(8));
 
+        private static readonly object setLock = new object();
         private static readonly object dictLock = new object();
         private static readonly object customListLock = new object();
 
-        public static Dictionary<Mesh, List<MeshProperties>> GetMeshMeshPropDict()
+        public static Dictionary<int, List<MeshProperties>> GetMeshMeshPropDict()
         {
             lock (dictLock)
             {
-                return dictionaryPool.Count > 0 ? dictionaryPool.Pop() : new Dictionary<Mesh, List<MeshProperties>>();
+                return dictionaryPool.Count > 0 ? dictionaryPool.Pop() : new Dictionary<int, List<MeshProperties>>();
             }
         }
 
-        public static void ReturnMeshMeshPropDict(Dictionary<Mesh, List<MeshProperties>> dict)
+        public static void ReturnMeshMeshPropDict(Dictionary<int, List<MeshProperties>> dict)
         {
             foreach (var pair in dict)
             {
@@ -65,6 +67,23 @@ namespace ProceduralObjects.Classes
             lock (customListLock)
             {
                 customListPool.Push(list);
+            }
+        }
+
+        public static HashSet<int> GetVisibilitySet()
+        {
+            lock (setLock)
+            {
+                return visibilitySetPool.Count > 0 ? visibilitySetPool.Pop() : new HashSet<int>();
+            }
+        }
+
+        public static void ReturnVisibilitySet(HashSet<int> set)
+        {
+            set.Clear();
+            lock (setLock)
+            {
+                visibilitySetPool.Push(set);
             }
         }
     }

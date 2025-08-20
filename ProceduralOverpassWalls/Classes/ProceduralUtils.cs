@@ -1,16 +1,16 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Xml;
-using System.Text;
-using UnityEngine;
-using ProceduralObjects.Tools;
-using System.IO;
-
-using ColossalFramework;
+﻿using ColossalFramework;
 using ColossalFramework.IO;
-using System.Threading.Tasks;
+using ProceduralObjects.Tools;
+using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Xml;
+using UnityEngine;
+using static ProceduralObjects.ProceduralObjectsLogic;
 
 namespace ProceduralObjects.Classes
 {
@@ -800,6 +800,73 @@ namespace ProceduralObjects.Classes
                 else
                     throw new Exception("[ProceduralObjects] Loading failure : Missing mesh data !");
                 target.vertices = Vertex.CreateVertexList(target);
+            }
+        }
+
+        public static bool TestPoInViewAndProcess(ProceduralObject obj, Camera cam, Vector3 camPos, float sqrDynMinThreshold, bool isNightTime)
+        {
+            if ((obj.layer != null && obj.layer.m_isHidden) || !RenderOptions.instance.CanRenderSingle(obj, isNightTime))
+                return false;
+
+            bool infiniteDist = obj.renderDistance >= 16001;
+            obj._squareDistToCam = (camPos - obj.m_position).sqrMagnitude;
+
+            float sqrRd = obj.renderDistance * RenderOptions.instance.globalMultiplier;
+            sqrRd *= sqrRd;
+            obj._insideRenderView = infiniteDist || obj._squareDistToCam <= sqrRd;
+
+            if (!obj._insideRenderView)
+            {
+                obj._insideUIview = false;
+                return false;
+            }
+
+            Vector3 screenPoint = cam.WorldToScreenPoint(obj.m_position);
+            if (screenPoint.z >= 0)
+                obj._insideUIview = infiniteDist || (obj._squareDistToCam <= Mathf.Max(sqrRd * 0.7f, sqrDynMinThreshold));
+            else
+                obj._insideUIview = false;
+
+
+            return true;
+        }
+
+
+        public static void ProcessBatchablePoDict(
+            SortingLists sortingList, Dictionary<string, List<int>> seqDict, Dictionary<string, List<MeshProperties>> propsDict, 
+            HashSet<int> set)
+        {
+            foreach (string key in seqDict.Keys)
+            {
+                if (seqDict[key].Count > 0)
+                {
+                    int headSeq = seqDict[key][0];
+                    if (!sortingList.localBatchDict.TryGetValue(headSeq, out _))
+                        sortingList.localBatchDict[headSeq] = HelperPool.GetMeshPropsList();
+                    List<MeshProperties> list = sortingList.localBatchDict[headSeq];
+                    //equivalentMtlDict.GetOrAdd(head.m_mesh, head.m_material);
+
+                    for (int j = 0; j < seqDict[key].Count; j++)
+                    {
+                        int poSeq = seqDict[key][j];
+                        //var obj = instance.proceduralObjects[poSeq];
+
+                        if (set.Contains(poSeq))
+                            list.Add(propsDict[key][j]);
+                    }
+                    //list.AddRange(propsDict[key]);
+                }
+                //else if (seqDict[key] != null && seqDict[key].Count > 0)
+                //{
+                //    for (int j = 0; j < seqDict[key].Count; j++)
+                //    {
+                //        int poSeq = seqDict[key][j];
+
+                //        if (set.Contains(poSeq))
+                //            sortingList.localUnbatchedList.Add(poSeq);
+                //    }
+                //    //sortingList.localUnbatchedList.AddRange(seqDict[key]);
+                //}
             }
         }
 

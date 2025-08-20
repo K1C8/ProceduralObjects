@@ -61,13 +61,19 @@ namespace ProceduralObjects.Classes
             if (children == null)  
             {
                 allPoIdList = proceduralObjectIndexSeqs;
+                string defaultPropShaderStr = "Custom/Props/Prop/Default";
                 List<ProceduralObject> proceduralObjects = ProceduralObjectsLogic.instance.proceduralObjects;
                 using (SHA1 sha1 = SHA1.Create())
                 {
-                    foreach (int poSeq in proceduralObjectIndexSeqs)
+                    foreach (int poSeq in allPoIdList)
                     {
                         var obj = proceduralObjects[poSeq];
-                        if (obj.meshStatus == 1 && obj.baseInfoType == "PROP" && obj.customTexture == null && obj.m_textParameters == null)
+                        if (obj.baseInfoType == "BUILDING" || obj.customTexture != null || !obj.m_material.shader.name.Equals(defaultPropShaderStr))
+                        {
+                            unbatchableList.Add(poSeq);
+                            continue;
+                        }
+                        else if(obj.meshStatus == 1 && obj.baseInfoType == "PROP" && obj.m_textParameters == null)
                         {
                             if (!batchOriginalPoIdDict.ContainsKey(obj._baseProp.name))
                                 batchOriginalPoIdDict[obj._baseProp.name] = new List<int>();
@@ -82,11 +88,6 @@ namespace ProceduralObjects.Classes
 
                             batchOriginalPoIdDict[obj._baseProp.name].Add(poSeq);
                             _unmodifiedMeshCount++;
-                            continue;
-                        }
-                        else if (obj.baseInfoType == "BUILDING" || obj.customTexture != null)
-                        {
-                            unbatchableList.Add(poSeq);
                             continue;
                         }
                         Vector3[] vertices = obj.m_mesh.vertices;
@@ -120,12 +121,12 @@ namespace ProceduralObjects.Classes
                         string objHashStr = sb.ToString();
                         if (!batchCustomArrayDict.ContainsKey(objHashStr))
                         {
-                            batchCustomArrayDict[objHashStr] = new List<MeshProperties>
-                        {
-                            new MeshProperties(Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one),
+                            batchCustomArrayDict[objHashStr] = new List<MeshProperties> 
+                            { 
+                                new MeshProperties(Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one),
                                 obj.disableCastShadows ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0),
                                 obj.m_color)
-                        };
+                            };
                         }
                         if (!batchCustomPoIdDict.ContainsKey(objHashStr))
                         {
@@ -152,13 +153,18 @@ namespace ProceduralObjects.Classes
                     }
                 }
 
-                foreach (var kv in batchCustomArrayDict)
+                foreach (var kv in batchCustomPoIdDict)
                 {
                     if (kv.Value.Count > 1)
                     {
                         _repeateModifiedMeshCount += kv.Value.Count;
                         Debug.Log($"[ProceduralObjects] Quad {bounds.center} loaded repeated meshStatus 2 meshes, meshId: {kv.Key}, count: {kv.Value.Count}");
                     }
+                }
+
+                foreach (var kv in batchOriginalPoIdDict)
+                {
+                     Debug.Log($"[ProceduralObjects] Quad {bounds.center} loaded unmodified meshStatus 1 meshes, meshId: {kv.Key}, count: {kv.Value.Count}");
                 }
 
                 Debug.Log($"[ProceduralObjects] In Quad {bounds.center}, total unmodified meshStatus 1 meshes count: {_unmodifiedMeshCount}, " +
