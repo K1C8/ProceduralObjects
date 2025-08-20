@@ -106,9 +106,9 @@ namespace ProceduralObjects
         private double poDrawMeshTimeSum;
         private double poUpdateTimeSum;
         private DateTime lastRenderTime;
-        private ConcurrentDictionary<Mesh, List<MeshProperties>> equivalentDict
-                    = new ConcurrentDictionary<Mesh, List<MeshProperties>>();
-        private ConcurrentDictionary<Mesh, Material> equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
+        private ConcurrentDictionary<int, List<MeshProperties>> equivalentDict
+                    = new ConcurrentDictionary<int, List<MeshProperties>>();
+        //private ConcurrentDictionary<Mesh, Material> equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
         private List<int> customList = new List<int>();
         //private List<int> overlayList = new List<int>();
         private MaterialPropertyBlock propertyBlock;
@@ -117,8 +117,8 @@ namespace ProceduralObjects
         //private Dictionary<Mesh, ShadowCastingMode[]> equivalentShadowCastingDictCache;
         //private Dictionary<Mesh, Color[]> equivalentColorDictCache;
         //private Dictionary<Mesh, Vector4[]> equivalentColorDictCache;
-        private Dictionary<Mesh, ComputeBuffer> equivalentPropertiesComputeBuffer;
-        private Dictionary<Mesh, ComputeBuffer> equivalentArgsComputeBuffer;
+        private Dictionary<int, ComputeBuffer> equivalentPropertiesComputeBuffer;
+        private Dictionary<int, ComputeBuffer> equivalentArgsComputeBuffer;
         private QuadTree quadTree;
 
         //private ComputeBuffer[] argsBufferArray;
@@ -214,9 +214,9 @@ namespace ProceduralObjects
             Debug.Log("[ProceduralObjects] Layers and PO data loaded in " + layerAndContainerLoadingTime + " seconds");
 
             DateTime staticsStart = DateTime.Now;
-            quadTree = new QuadTree(7); //, proceduralObjects);
+            quadTree = new QuadTree(8); //, proceduralObjects);
             double staticsTime = Math.Round((DateTime.Now - staticsStart).TotalMilliseconds, 2);
-            Debug.Log("[ProceduralObjects] Building QuadTree and checking potential batchable modified object in " + fontAndMiscGUILoadingTime + " milliseconds");
+            Debug.Log("[ProceduralObjects] Building QuadTree and checking potential batchable modified object in " + staticsTime + " milliseconds");
 
             new POStatisticsManager(this);
             ProceduralTool.CreateCursors();
@@ -238,9 +238,9 @@ namespace ProceduralObjects
 
             // Tests for DrawMeshInstanced on props with meshStatus==1
             isGPUSupportInstancing = SystemInfo.supportsInstancing; 
-            equivalentDict = new ConcurrentDictionary<Mesh, List<MeshProperties>>();
+            equivalentDict = new ConcurrentDictionary<int, List<MeshProperties>>();
             //equivalentDictCache = new Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]>();
-            equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
+            //equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
             customList = new List<int>();
             //overlayList = new List<int>();
             propertyBlock = new MaterialPropertyBlock();
@@ -267,28 +267,31 @@ namespace ProceduralObjects
                 }
                 //string instancingKeyword = "INSTANCING_ON";
                 string shadeCastingKeyword = "SHADOWS_SCREEN";
-                equivalentPropertiesComputeBuffer = new Dictionary<Mesh, ComputeBuffer>();
-                equivalentArgsComputeBuffer = new Dictionary<Mesh, ComputeBuffer>();
+                equivalentPropertiesComputeBuffer = new Dictionary<int, ComputeBuffer>();
+                equivalentArgsComputeBuffer = new Dictionary<int, ComputeBuffer>();
                 uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
                 loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testshaderind", out Shader instancedTestShader);
+                
+                List<Quad> leafQuads = quadTree.GetLeafQuads();
+                HashSet<int> unbatchedPoSeqs = new HashSet<int>();
+
+                foreach (Quad quad in leafQuads)
+                {
+                    unbatchedPoSeqs.UnionWith(quad.unbatchableList);
+                }
 
                 for (int i = 0; i < proceduralObjects.Count; i++)
                 {
+                    if (unbatchedPoSeqs.Contains(i))
+                        continue;
+
                     var obj = proceduralObjects[i];
-                    if (obj.meshStatus == 1 && obj.m_material.shader.name.Equals("Custom/Props/Prop/Default") && obj.m_textParameters == null)
+                    if (obj.m_material.shader.name.Equals("Custom/Props/Prop/Default"))
                     {
                         obj.m_material.shader = instancedTestShader;
                         obj.m_material.EnableKeyword(shadeCastingKeyword);
                         obj.m_material.enableInstancing = true;
                         updateCount++;
-                        //if (!equivalentPropertiesComputeBuffer.ContainsKey(obj.m_mesh))
-                        //{
-                        //    equivalentPropertiesComputeBuffer.Add(obj.m_mesh, new ComputeBuffer(pair.Value.Length, MeshProperties.Size()));
-                        //}
-                        //if (!equivalentArgsComputeBuffer.ContainsKey(obj.m_mesh))
-                        //{
-                        //    equivalentArgsComputeBuffer.Add(obj.m_mesh, new ComputeBuffer(1, args.Length * sizeof(uint), ComputeBufferType.IndirectArguments));
-                        //}
 #if DEBUG
                         Debug.Log(string.Format("[ProceduralObjects] Modifing {0}, {1}, {2} properties of shader {3} to {4}, {5}, {6}",
                             instancingKeyword, "", "", 
@@ -298,6 +301,7 @@ namespace ProceduralObjects
                     }
 
                 }
+                unbatchedPoSeqs.Clear();
             }
 
             lastRenderTime = DateTime.Now;
@@ -398,126 +402,79 @@ namespace ProceduralObjects
             var timeFromLastUpdate = Math.Round((DateTime.Now - lastRenderTime).TotalMilliseconds, 2);
 
             quadTree.DrawQuadBounds();
-            List<Quad> leafQuads = quadTree.GetLeafQuads();
-            StringBuilder sb = new StringBuilder().Append("[ProceduralObjects] Visible leaf Quads in QuadTree are: ");
-            Plane[] frustum = GeometryUtility.CalculateFrustumPlanes(renderCamera);
-            List<int> visiblePoSeqList = new List<int>();
-            foreach (Quad quad in leafQuads)
-            {
-                if (GeometryUtility.TestPlanesAABB(frustum, quad.bounds))
-                {
-                    sb.Append($"Quad {quad.bounds.center}, ");
-                    visiblePoSeqList.AddRange(quad.allPoIdList);
-                }
-            }
-            Debug.Log(sb.ToString());
 
-            if (proceduralObjects != null && timeFromLastUpdate >= 50.0)
+            if (proceduralObjects != null && timeFromLastUpdate >= 20.0)
             {
                 customList.Clear();
                 //overlayList.Clear(); 
                 object dictLock = new object();
                 object listLock = new object();
 
+                List<Quad> leafQuads = quadTree.GetLeafQuads();
+                List<Quad> visibleLeafQuads = new List<Quad>();
+                //StringBuilder sb = new StringBuilder().Append("[ProceduralObjects] Visible leaf Quads in QuadTree are: ");
+                Plane[] frustum = GeometryUtility.CalculateFrustumPlanes(renderCamera);
+                List<int> visiblePoSeqList = new List<int>();
+                foreach (Quad quad in leafQuads)
+                {
+                    if (GeometryUtility.TestPlanesAABB(frustum, quad.bounds))
+                    {
+                        //sb.Append($"Quad {quad.bounds.center}, ");
+                        visibleLeafQuads.Add(quad);
+                        visiblePoSeqList.AddRange(quad.allPoIdList);
+                    }
+                }
+                //Debug.Log(sb.ToString());
+
+                HashSet<int> visibilitySet = HelperPool.GetVisibilitySet();
+
                 var sqrDynMinThreshold = ProceduralObjectsMod.DynamicRDMinThreshold.value * ProceduralObjectsMod.DynamicRDMinThreshold.value;
                 bool isNightTime = Singleton<SimulationManager>.instance.m_isNightTime;
                 Camera cam = renderCamera;
                 Vector3 camPos = renderCamera.transform.position;
 
-                loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testshaderind", out Shader instancedTestShader);
+                Parallel.For(0, visiblePoSeqList.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCount },
+                    () => HelperPool.GetVisibilitySet(),
+                    (i, loop, localSet) =>
+                {
+                    int poSeq = visiblePoSeqList[i];
+                    var obj = proceduralObjects[poSeq];
+                    if (ProceduralUtils.TestPoInViewAndProcess(obj, cam, camPos, sqrDynMinThreshold, isNightTime))
+                        localSet.Add(poSeq);
+                    return localSet;
+
+                }, localSet =>
+                {
+                    lock (listLock)
+                    {
+                        visibilitySet.UnionWith(localSet);
+                    }
+                    HelperPool.ReturnVisibilitySet(localSet);
+                });
+
+
+                //loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testshaderind", out Shader instancedTestShader);
 
                 //Debug.Log("[ProceduralObjects] Max thread count is " + maxThreadCount);
-                // Small test for streaming mesh
-                //int luckyPO = UnityEngine.Random.Range(0, proceduralObjects.Count - 2);
-                //Vector3[] vector3s = proceduralObjects[luckyPO].m_mesh.vertices;
-                //MemoryStream stream = new MemoryStream();
-                //Serializer.Serialize(stream, SerializableVector3.ToSerializableArray(vector3s));
-                //stream.Position = 0;
-                //string testString = Encoding.UTF8.GetString(stream.ToArray());
-                //Debug.Log($"[ProceduralObjects] Lucky PO vertices converted to string as: {testString}");
 
-
-                Parallel.For(0, proceduralObjects.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCount }, 
-                    () => 
-                    {
-                        return new SortingLists(HelperPool.GetMeshMeshPropDict(), HelperPool.GetCustomList());
-                    }, //new Dictionary<Mesh, List<MeshProperties>>(), 
+                Parallel.For(0, visibleLeafQuads.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCount }, 
+                    () => new SortingLists(HelperPool.GetMeshMeshPropDict(), HelperPool.GetCustomList()),
                     (i, loop, localLists) =>
                 {
-                    //int tid = Thread.CurrentThread.ManagedThreadId % maxThreadCount;
-
-                    var obj = proceduralObjects[(int)i];
-                    if (obj.layer != null && obj.layer.m_isHidden)
-                        return localLists;
-
-                    bool infiniteDist = obj.renderDistance >= 16001;
-                    obj._squareDistToCam = (camPos - obj.m_position).sqrMagnitude;
-
-                    float sqrRd = 0;
-                    if (infiniteDist)
+                    Quad current = visibleLeafQuads[i];
+                    for (int j = 0; j < current.unbatchableList.Count; j ++)
                     {
-                        obj._insideRenderView = true;
-                    }
-                    else
-                    {
-                        sqrRd = (obj.renderDistance * RenderOptions.instance.globalMultiplier);
-                        sqrRd *= sqrRd;
-                        obj._insideRenderView = obj._squareDistToCam <= sqrRd;
+                        int poSeq = current.unbatchableList[j];
+
+                        if (visibilitySet.Contains(poSeq))
+                            localLists.localUnbatchedList.Add(poSeq);
                     }
 
-                    if (!obj._insideRenderView)
-                    {
-                        obj._insideUIview = false;
-                        return localLists;
-                    }
+                    ProceduralUtils.ProcessBatchablePoDict(localLists, current.batchOriginalPoIdDict, current.batchOriginalArrayDict, visibilitySet);
+                    ProceduralUtils.ProcessBatchablePoDict(localLists, current.batchCustomPoIdDict, current.batchCustomArrayDict, visibilitySet);
 
-                    Vector3 screenPoint = cam.WorldToScreenPoint(obj.m_position);
-                    if (screenPoint.z >= 0)
-                        obj._insideUIview = infiniteDist || (obj._squareDistToCam <= Mathf.Max(sqrRd * 0.7f, sqrDynMinThreshold));
-                    else
-                        obj._insideUIview = false;
-
-                    if (!RenderOptions.instance.CanRenderSingle(obj, isNightTime))
-                        return localLists;
-
-                    try
-                    {
-                        // For test only, material differences like custom texts/rects are not yet considered, they are put into render pipe in the default way.
-                        if (obj.meshStatus == 1 && obj.m_material.shader == instancedTestShader && obj.m_textParameters == null && obj.customTexture == null)
-                        {
-                            Matrix4x4 m4x4 = Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one);
-                            var item = new MeshProperties(m4x4, obj.disableCastShadows ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0), obj.m_color);
-
-                            if (!localLists.localBatchDict.TryGetValue(obj.m_mesh, out var list))
-                            {
-                                //list = new List<MeshProperties>();
-                                list = HelperPool.GetMeshPropsList();
-                                localLists.localBatchDict[obj.m_mesh] = list;
-                            }
-                            list.Add(item);
-                            equivalentMtlDict.GetOrAdd(obj.m_mesh, obj.m_material);
-                        }
-                        else // (obj.meshStatus == 2 || obj.m_material.shader != instancedTestShader || obj.m_textParameters != null || obj.customTexture != null)
-                        {
-                            //customDict.GetOrAdd(i, m4x4);
-                            localLists.localCustomList.Add(i);
-                        }
-
-                        //if (SingleHoveredObj == obj || (selectedGroup == null ? (obj.group == null ? false : obj.group.root == SingleHoveredObj) : false))
-                        //if (SingleHoveredObj == obj || (selectedGroup == null && obj.group != null && obj.group.root == SingleHoveredObj))
-                        //    //overlayDict.GetOrAdd(i, m4x4);
-                        //    overlayList[(int)i] = m4x4;
-
-                    }
-                    catch (Exception e)
-                    {
-                        Debug.LogError("[ProceduralObjects] Error while calculating object " + obj.id.ToString() + " (" + obj.basePrefabName + " of type " + obj.baseInfoType
-                            + " : " + e.Message + " - Stack Trace : " + e.StackTrace + " Sent to DrawMesh : " + (obj.m_mesh == null).ToString() + "," +
-                            (obj.m_position).ToString() + "," +
-                            (obj.m_rotation).ToString() + "," +
-                            (obj.m_material == null).ToString() + "," +
-                            (renderCamera == null).ToString());
-                    }
+                    Debug.Log($"[ProceduralObjects] Quad {current.bounds.center} has {localLists.localUnbatchedList.Count} POs are unbatched, and has" +
+                        $" {localLists.localBatchDict.Count} types of batched POs.");
 
                     return localLists;
                 }, localLists =>
@@ -526,7 +483,7 @@ namespace ProceduralObjects
                     {
                         foreach (var kv in localLists.localBatchDict)
                         {
-                            if (kv.Key == null || kv.Value == null)
+                            if (kv.Value == null)
                                 continue;
                             if (!equivalentDict.TryGetValue(kv.Key, out var existing))
                             {
@@ -538,16 +495,16 @@ namespace ProceduralObjects
                             //Debug.Log($"[ProceduralObjects] Processing result from thread {tid}, current list {kv.Key.name} with {kv.Value.Count} instances. List length {existing.Count}");
                         }
                     }
-                    if (localLists.localCustomList.Count > 0)
+                    if (localLists.localUnbatchedList.Count > 0)
                     {
                         lock (listLock)
                         {
-                            customList.AddRange(localLists.localCustomList);
+                            customList.AddRange(localLists.localUnbatchedList);
                         }
                     }
 
                     HelperPool.ReturnMeshMeshPropDict(localLists.localBatchDict);
-                    HelperPool.ReturnCustomList(localLists.localCustomList);
+                    HelperPool.ReturnCustomList(localLists.localUnbatchedList);
                 });
 
                 DateTime sortStartTime = DateTime.Now;
@@ -562,7 +519,7 @@ namespace ProceduralObjects
                     if (size <= 0)
                     {
                         equivalentDict.TryRemove(pair.Key, out _);
-                        equivalentMtlDict.TryRemove(pair.Key, out _);
+                        //equivalentMtlDict.TryRemove(pair.Key, out _);
                         continue;
                     }
 
@@ -574,21 +531,14 @@ namespace ProceduralObjects
                     {
                         equivalentArgsComputeBuffer.Add(pair.Key, new ComputeBuffer(1, 5 * sizeof(uint), ComputeBufferType.IndirectArguments));
                     }
-
+                    Mesh mesh = proceduralObjects[pair.Key].m_mesh;
                     ComputeBuffer argsBuffer = equivalentArgsComputeBuffer[pair.Key];
                     uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
-                    args[0] = (pair.Key != null) ? pair.Key.GetIndexCount(0) : 0;
+                    args[0] = mesh.GetIndexCount(0);
                     args[1] = (uint)size;
-                    args[2] = pair.Key.GetIndexStart(0);
+                    args[2] = mesh.GetIndexStart(0);
 
                     ComputeBuffer meshPropertiesBuffer = equivalentPropertiesComputeBuffer[pair.Key];
-                    //MeshProperties[] propertiesArray = new MeshProperties[size];
-
-                    //for (int i = 0; i < size; i++)
-                    //{
-                    //    currItem = pair.Value[i];
-                    //    propertiesArray[i] = currItem;
-                    //}
 
                     MeshProperties[] propertiesArray = pair.Value.ToArray();
 
@@ -598,6 +548,11 @@ namespace ProceduralObjects
                     meshPropertiesBuffer.SetData(propertiesArray);
 
                 }
+
+                visiblePoSeqList.Clear();
+                HelperPool.ReturnVisibilitySet(visibilitySet);
+                leafQuads.Clear();
+
                 lastRenderTime = DateTime.Now;
                 double sortTime = Math.Round((DateTime.Now - sortStartTime).TotalMilliseconds, 2);
                 double totalTime = Math.Round((DateTime.Now - startTime).TotalMilliseconds, 2);
@@ -686,24 +641,27 @@ namespace ProceduralObjects
 
                     foreach (var pair in equivalentDict)
                     {
-                        if (pair.Key == null)
+                        ComputeBuffer argsBuffer = equivalentArgsComputeBuffer[pair.Key];
+                        ComputeBuffer meshPropertiesBuffer = equivalentPropertiesComputeBuffer[pair.Key];
+                        Mesh mesh = proceduralObjects[pair.Key].m_mesh;
+
+                        if (mesh == null)
                         {
                             Debug.Log("[ProceduralObjects] Empty mesh encountered during rendering process.");
                             continue;
                         }
 
-                        ComputeBuffer argsBuffer = equivalentArgsComputeBuffer[pair.Key];
-                        ComputeBuffer meshPropertiesBuffer = equivalentPropertiesComputeBuffer[pair.Key];
+                        Material material = proceduralObjects[pair.Key].m_material;
 
                         propertyBlock.SetBuffer("_Properties", meshPropertiesBuffer);
                         try
                         {
                             //Debug.Log(string.Format("[ProceduralObjects] Peeking first item in equivalentScratchpad list {0} iteration {1}, item with m4x4s {2}.", pair.Key.name, i, subMatrix4x4s[0].ToString()));
-                            Graphics.DrawMeshInstancedIndirect(pair.Key, 0, equivalentMtlDict[pair.Key], new Bounds(Vector3.zero, new Vector3(10000.0f, 10000.0f, 10000.0f)), argsBuffer, 0, propertyBlock, ShadowCastingMode.On, true, 0, renderCamera);
+                            Graphics.DrawMeshInstancedIndirect(mesh, 0, material, new Bounds(Vector3.zero, new Vector3(10000.0f, 10000.0f, 10000.0f)), argsBuffer, 0, propertyBlock, ShadowCastingMode.On, true, 0, renderCamera);
                         }
                         catch (Exception e)
                         {
-                            Debug.LogError("[ProceduralObjects] Error while rendering mesh instanced indirect " + pair.Key.name + ": " + e.Message + " - Stack Trace : " + e.StackTrace);
+                            Debug.LogError("[ProceduralObjects] Error while rendering mesh instanced indirect " + mesh.name + ": " + e.Message + " - Stack Trace : " + e.StackTrace);
                         }
 
                         //Debug.Log(string.Format("[ProceduralObjects] Mesh {0} count observed is {1}.", pair.Key.name, pair.Value.Length));
@@ -715,46 +673,30 @@ namespace ProceduralObjects
                             proceduralObjects[index].m_material, 0, null, 0, null, !proceduralObjects[index].disableCastShadows, true);
                     }
 
-                    void processHoveredOverlay()
+                    // If the user is hovering on single ungroupped object, or single object in a group when a group is selected, overlay it with purple.
+                    // If the user is hovering on the root of a group, overlay the group with red.
+                    if (SingleHoveredObj != null)
                     {
-                        // If the user is hovering on single ungroupped object, or single object in a group when a group is selected, overlay it with purple.
-                        // If the user is hovering on the root of a group, overlay the group with red.
-                        if (SingleHoveredObj == null)
-                            return;
                         //if (SingleHoveredObj == obj || (selectedGroup == null && (obj.group != null && obj.group.root == SingleHoveredObj)))
                         //    Graphics.DrawMesh(obj.overlayRenderMesh, obj.m_position, obj.m_rotation,
                         //        selectedGroup == null ? (SingleHoveredObj.isRootOfGroup ? redOverlayMat : purpleOverlayMat) : purpleOverlayMat,
                         //        0, null, 0, null, false, false);
-                        if (selectedGroup == null)
+                        if (selectedGroup == null && SingleHoveredObj.isRootOfGroup)
                         {
-                            foreach (var group in groups)
+                            // Process the group that its root is being hovered on, overlay with red.
+                            foreach (var obj in SingleHoveredObj.group.objects)
                             {
-                                // Skip all groups that their roots are not being hovered on.
-                                if (group.root != SingleHoveredObj)
-                                    continue;
-                                // Process the group that its root is being hovered on, overlay with red.
-                                foreach (var obj in group.objects)
-                                {
-                                    Graphics.DrawMesh(obj.overlayRenderMesh, obj.m_position, obj.m_rotation, redOverlayMat, 0, null, 0, null, false, false);
-                                }
-                                // If the code goes here, that means a group root is hovered on and the overlay of the group is rendered, the process is finish.
-                                // PO only have one object being hovered on at any given time, by my observation. --ccy 25/08/16
-                                return;
+                                Graphics.DrawMesh(obj.overlayRenderMesh, obj.m_position, obj.m_rotation, redOverlayMat, 0, null, 0, null, false, false);
                             }
-                            // If the code reaches here, then no group roots are being hovered on, while there is an non-null SingleHoveredObject.
-                            Graphics.DrawMesh(SingleHoveredObj.overlayRenderMesh, SingleHoveredObj.m_position, SingleHoveredObj.m_rotation, purpleOverlayMat,
-                                0, null, 0, null, false, false);
-                            return;
                         }
                         else
                         {
-                            // We need to render the object hovered in a selected group in red here.
+                            // Render the object hovered in a selected group or not belonging to a group in red.
                             Graphics.DrawMesh(SingleHoveredObj.overlayRenderMesh, SingleHoveredObj.m_position, SingleHoveredObj.m_rotation, purpleOverlayMat,
                                 0, null, 0, null, false, false);
                         }
                     }
 
-                    processHoveredOverlay();
                 }
                 catch (Exception e)
                 {
@@ -2371,8 +2313,6 @@ namespace ProceduralObjects
                 poUpdateTimeSum = 0.0;
             }
 
-            visiblePoSeqList.Clear();
-            leafQuads.Clear();
         }
 
 
@@ -4619,13 +4559,13 @@ namespace ProceduralObjects
 
         public struct SortingLists
         {
-            public Dictionary<Mesh, List<MeshProperties>> localBatchDict;
-            public List<int> localCustomList;
+            public Dictionary<int, List<MeshProperties>> localBatchDict;
+            public List<int> localUnbatchedList;
 
-            public SortingLists(Dictionary<Mesh, List<MeshProperties>> dict,  List<int> list)
+            public SortingLists(Dictionary<int, List<MeshProperties>> dict,  List<int> list)
             {
                 localBatchDict = dict;
-                localCustomList = list;
+                localUnbatchedList = list;
             }
         }
 
