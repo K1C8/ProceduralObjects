@@ -11,7 +11,7 @@ namespace ProceduralObjects.Classes
     internal static class HelperPool
     {
         static readonly Stack<Dictionary<int, List<MeshProperties>>> dictionaryPool = new Stack<Dictionary<int, List<MeshProperties>>>(32);
-        static readonly Stack<List<int>> customListPool = new Stack<List<int>>(32);
+        static readonly Stack<List<int>> intListPool = new Stack<List<int>>(32);
         static readonly Stack<HashSet<int>> visibilitySetPool = new Stack<HashSet<int>>(32);
         static readonly ThreadLocal<Stack<List<MeshProperties>>> localMeshPropsPool = new ThreadLocal<Stack<List<MeshProperties>>>(() => new Stack<List<MeshProperties>>(8));
 
@@ -19,7 +19,7 @@ namespace ProceduralObjects.Classes
         private static readonly object dictLock = new object();
         private static readonly object customListLock = new object();
 
-        public static Dictionary<int, List<MeshProperties>> GetMeshMeshPropDict()
+        public static Dictionary<int, List<MeshProperties>> GetIntMeshPropDict()
         {
             lock (dictLock)
             {
@@ -27,7 +27,7 @@ namespace ProceduralObjects.Classes
             }
         }
 
-        public static void ReturnMeshMeshPropDict(Dictionary<int, List<MeshProperties>> dict)
+        public static void ReturnIntMeshPropDict(Dictionary<int, List<MeshProperties>> dict)
         {
             foreach (var pair in dict)
             {
@@ -53,20 +53,20 @@ namespace ProceduralObjects.Classes
             localMeshPropsPool.Value.Push(list);
         }
 
-        public static List<int> GetCustomList()
+        public static List<int> GetIntList()
         {
             lock (customListLock)
             {
-                return customListPool.Count > 0 ? customListPool.Pop() : new List<int>();
+                return intListPool.Count > 0 ? intListPool.Pop() : new List<int>();
             }
         }
 
-        public static void ReturnCustomList(List<int> list)
+        public static void ReturnIntList(List<int> list)
         {
             list.Clear();
             lock (customListLock)
             {
-                customListPool.Push(list);
+                intListPool.Push(list);
             }
         }
 
