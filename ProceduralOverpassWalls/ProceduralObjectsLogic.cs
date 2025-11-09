@@ -414,14 +414,14 @@ namespace ProceduralObjects
                 List<Quad> visibleLeafQuads = new List<Quad>();
                 //StringBuilder sb = new StringBuilder().Append("[ProceduralObjects] Visible leaf Quads in QuadTree are: ");
                 Plane[] frustum = GeometryUtility.CalculateFrustumPlanes(renderCamera);
-                List<int> visiblePoSeqList = new List<int>();
+                List<int> viewportPoSeqList = new List<int>();
                 foreach (Quad quad in leafQuads)
                 {
                     if (GeometryUtility.TestPlanesAABB(frustum, quad.bounds))
                     {
                         //sb.Append($"Quad {quad.bounds.center}, ");
                         visibleLeafQuads.Add(quad);
-                        visiblePoSeqList.AddRange(quad.allPoIdList);
+                        viewportPoSeqList.AddRange(quad.allPoIdList);
                     }
                 }
                 //Debug.Log(sb.ToString());
@@ -430,16 +430,15 @@ namespace ProceduralObjects
 
                 var sqrDynMinThreshold = ProceduralObjectsMod.DynamicRDMinThreshold.value * ProceduralObjectsMod.DynamicRDMinThreshold.value;
                 bool isNightTime = Singleton<SimulationManager>.instance.m_isNightTime;
-                Camera cam = renderCamera;
                 Vector3 camPos = renderCamera.transform.position;
 
-                Parallel.For(0, visiblePoSeqList.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCount },
+                Parallel.For(0, viewportPoSeqList.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCount },
                     () => HelperPool.GetVisibilitySet(),
                     (i, loop, localSet) =>
                 {
-                    int poSeq = visiblePoSeqList[i];
+                    int poSeq = viewportPoSeqList[i];
                     var obj = proceduralObjects[poSeq];
-                    if (ProceduralUtils.TestPoInViewAndProcess(obj, cam, camPos, sqrDynMinThreshold, isNightTime))
+                    if (ProceduralUtils.TestPoInViewAndProcess(obj, renderCamera, camPos, sqrDynMinThreshold, isNightTime))
                         localSet.Add(poSeq);
                     return localSet;
 
@@ -458,7 +457,7 @@ namespace ProceduralObjects
                 //Debug.Log("[ProceduralObjects] Max thread count is " + maxThreadCount);
 
                 Parallel.For(0, visibleLeafQuads.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCount }, 
-                    () => new SortingLists(HelperPool.GetMeshMeshPropDict(), HelperPool.GetCustomList()),
+                    () => new SortingLists(HelperPool.GetIntMeshPropDict(), HelperPool.GetIntList()),
                     (i, loop, localLists) =>
                 {
                     Quad current = visibleLeafQuads[i];
@@ -503,8 +502,8 @@ namespace ProceduralObjects
                         }
                     }
 
-                    HelperPool.ReturnMeshMeshPropDict(localLists.localBatchDict);
-                    HelperPool.ReturnCustomList(localLists.localUnbatchedList);
+                    HelperPool.ReturnIntMeshPropDict(localLists.localBatchDict);
+                    HelperPool.ReturnIntList(localLists.localUnbatchedList);
                 });
 
                 DateTime sortStartTime = DateTime.Now;
@@ -549,7 +548,7 @@ namespace ProceduralObjects
 
                 }
 
-                visiblePoSeqList.Clear();
+                viewportPoSeqList.Clear();
                 HelperPool.ReturnVisibilitySet(visibilitySet);
                 leafQuads.Clear();
 
