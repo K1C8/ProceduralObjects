@@ -1,0 +1,51 @@
+# Visual Studio files
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.resharper
+*.resharper.user
+
+# Build artifacts
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+*.pdb
+*.exe
+*.dll
+*.mdb
+*.tmp
+*.log
+*.bak
+*.cache
+*.ncb
+*.scc
+*.vssscc
+*.vspscc
+
+# NuGet packages
+packages/
+*.nupkg
+project.lock.json
+
+# Test results and temporary files (specific to MSTest and testing in general)
+TestResults/
+*.trx
+*.testsettings
+*.runsettings
+*.coverage
+*.coveragexml
+*.vsp
+*.vspx
+*.diagsession
+
+# Rider files (if using JetBrains Rider)
+.idea/
+*.sln.iml
+
+# Other common files to ignore
+Thumbs.db
+Desktop.ini
+*.DS_Store
