@@ -63,6 +63,10 @@ namespace ProceduralObjects.Classes
 
         public static void ReturnIntList(List<int> list)
         {
+            if (list == null)
+            {
+                throw new ArgumentNullException("ReturnIntList() got a null to return.");
+            }
             list.Clear();
             lock (customListLock)
             {
