@@ -11,13 +11,13 @@ namespace ProceduralObjectsTests
         static readonly Stack<Dictionary<int, List<T>>> dictionaryPool = new Stack<Dictionary<int, List<T>>>(32);
         static readonly Stack<List<int>> intListPool = new Stack<List<int>>(32);
         static readonly Stack<HashSet<int>> visibilitySetPool = new Stack<HashSet<int>>(32);
-        static readonly ThreadLocal<Stack<List<T>>> localMeshPropsPool = new ThreadLocal<Stack<List<T>>>(() => new Stack<List<T>>(8));
+        static readonly ThreadLocal<Stack<List<T>>> localGenericPool = new ThreadLocal<Stack<List<T>>>(() => new Stack<List<T>>(8));
 
         private static readonly object setLock = new object();
         private static readonly object dictLock = new object();
         private static readonly object customListLock = new object();
 
-        public static Dictionary<int, List<T>> GetIntMeshPropDict()
+        public static Dictionary<int, List<T>> GetIntGenericDict()
         {
             lock (dictLock)
             {
@@ -25,12 +25,12 @@ namespace ProceduralObjectsTests
             }
         }
 
-        public static void ReturnIntMeshPropDict(Dictionary<int, List<T>> dict)
+        public static void ReturnIntGenericDict(Dictionary<int, List<T>> dict)
         {
             foreach (var pair in dict)
             {
                 pair.Value.Clear();
-                ReturnMeshPropsList(pair.Value);
+                ReturnGenericList(pair.Value);
             }
 
             dict.Clear();
@@ -40,15 +40,15 @@ namespace ProceduralObjectsTests
             }
         }
 
-        public static List<T> GetMeshPropsList()
+        public static List<T> GetGenericList()
         {
-            return localMeshPropsPool.Value.Count > 0 ? localMeshPropsPool.Value.Pop() : new List<T>();
+            return localGenericPool.Value.Count > 0 ? localGenericPool.Value.Pop() : new List<T>();
         }
 
-        public static void ReturnMeshPropsList(List<T> list)
+        public static void ReturnGenericList(List<T> list)
         {
             list.Clear();
-            localMeshPropsPool.Value.Push(list);
+            localGenericPool.Value.Push(list);
         }
 
         public static List<int> GetIntList()
