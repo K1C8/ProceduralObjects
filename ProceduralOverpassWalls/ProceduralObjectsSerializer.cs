@@ -106,6 +106,11 @@ namespace ProceduralObjects
             }
             var byteArrayCopyTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
             Debug.Log("[ProceduralObjects] byteProceduralObjectsArray finished in " + byteArrayCopyTime + " seconds");
+            // TODO: Write byteArrayCopyTime to binary file for ref.
+            string formattedTime = startTime.ToString("yyyyMMddHHmmss");
+            string testOutputPath = string.Format($"D:\\Test\\original_{formattedTime}.bin");
+
+            File.WriteAllBytes(testOutputPath, byteProceduralObjectsArray);
 
             if (byteProceduralObjectsArray.Length > 0)
             {
