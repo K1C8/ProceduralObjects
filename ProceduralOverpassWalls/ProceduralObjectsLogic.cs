@@ -1,26 +1,26 @@
-﻿using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Collections.Concurrent;
-using System;
-using UnityEngine.Rendering;
-using UnityEngine;
-using System.IO;
-
-using ProceduralObjects.Classes;
-using ProceduralObjects.UI;
-using ProceduralObjects.Tools;
-using ProceduralObjects.SelectionMode;
-using ProceduralObjects.Localization;
-using ProceduralObjects.ProceduralText;
-
-using ColossalFramework.UI;
+﻿using ColossalFramework;
 using ColossalFramework.Globalization;
 using ColossalFramework.PlatformServices;
-using ColossalFramework;
+using ColossalFramework.UI;
+using ProceduralObjects.Classes;
+using ProceduralObjects.Localization;
+using ProceduralObjects.ProceduralText;
+using ProceduralObjects.SelectionMode;
+using ProceduralObjects.Tools;
+using ProceduralObjects.UI;
+using System;
 using System.Collections;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
+using UnityEngine;
+using UnityEngine.Profiling;
+using UnityEngine.Rendering;
 
 namespace ProceduralObjects
 {
@@ -93,6 +93,11 @@ namespace ProceduralObjects
         public MeasurementsManager measurementsManager;
         public SelectionFilters filters;
 
+        //public long allocBytes;
+        public long monoSize;
+        public long gcAllocCount;
+        public int lastGCCount;
+
         public bool showLayerSetScroll = false, showMoreTools = false;
         private Vector2 scrollLayerSet = Vector2.zero;
 
@@ -120,6 +125,9 @@ namespace ProceduralObjects
         private Dictionary<int, ComputeBuffer> equivalentPropertiesComputeBuffer;
         private Dictionary<int, ComputeBuffer> equivalentArgsComputeBuffer;
         private QuadTree quadTree;
+        object dictLock = new object();
+        object listLock = new object();
+        Recorder recorder;
 
         //private ComputeBuffer[] argsBufferArray;
         //private ComputeBuffer meshPropertiesBuffer;
@@ -185,6 +193,10 @@ namespace ProceduralObjects
             moduleManager = new ModuleManager(this);
             measurementsManager = new MeasurementsManager(this);
             filters = new SelectionFilters();
+            recorder = Recorder.Get("GC.Alloc");
+            recorder.enabled = false;
+            recorder.enabled = true;
+            lastGCCount = GC.CollectionCount(0); 
 
             double fontAndMiscGUILoadingTime = Math.Round((DateTime.Now - fontAndMiscGUILoadStartTime).TotalSeconds, 2);
             Debug.Log("[ProceduralObjects] Fonts, GUI and misc items loaded in " + fontAndMiscGUILoadingTime + " seconds");
@@ -407,14 +419,13 @@ namespace ProceduralObjects
             {
                 customList.Clear();
                 //overlayList.Clear(); 
-                object dictLock = new object();
-                object listLock = new object();
 
                 List<Quad> leafQuads = quadTree.GetLeafQuads();
                 List<Quad> visibleLeafQuads = new List<Quad>();
                 //StringBuilder sb = new StringBuilder().Append("[ProceduralObjects] Visible leaf Quads in QuadTree are: ");
                 Plane[] frustum = GeometryUtility.CalculateFrustumPlanes(renderCamera);
-                List<int> viewportPoSeqList = new List<int>();
+                //List<int> viewportPoSeqList = new List<int>();
+                List<int> viewportPoSeqList = HelperPool.GetIntList();
                 foreach (Quad quad in leafQuads)
                 {
                     if (GeometryUtility.TestPlanesAABB(frustum, quad.bounds))
@@ -484,7 +495,7 @@ namespace ProceduralObjects
                         {
                             if (kv.Value == null)
                                 continue;
-                            if (!equivalentDict.TryGetValue(kv.Key, out var existing))
+                            if (!equivalentDict.TryGetValue(kv.Key, out List<MeshProperties> existing))
                             {
                                 existing = new List<MeshProperties>(kv.Value.Count);
                                 equivalentDict[kv.Key] = existing;
@@ -513,7 +524,7 @@ namespace ProceduralObjects
                 foreach (var pair in equivalentDict)
                 {
                     int size = pair.Value.Count;
-
+                    Debug.Log($"[ProceduralObjects] Processing result. Current list head {pair.Key} with {pair.Value.Count} instances.");
                     // Processing blank queue/list in equivalentDict.
                     if (size <= 0)
                     {
@@ -548,14 +559,39 @@ namespace ProceduralObjects
 
                 }
 
-                viewportPoSeqList.Clear();
+                
+                //viewportPoSeqList.Clear();
+                HelperPool.ReturnIntList(viewportPoSeqList);
                 HelperPool.ReturnVisibilitySet(visibilitySet);
                 leafQuads.Clear();
 
                 lastRenderTime = DateTime.Now;
                 double sortTime = Math.Round((DateTime.Now - sortStartTime).TotalMilliseconds, 2);
                 double totalTime = Math.Round((DateTime.Now - startTime).TotalMilliseconds, 2);
-                Debug.Log(string.Format("[ProceduralObjects] Total sorting time consumed {0} ms, sorting equivalentDictCache consumed {1} ms to complete.", totalTime, sortTime));
+                int gcCount = GC.CollectionCount(0);
+                monoSize = Profiler.GetMonoUsedSizeLong() / 1024 / 1024;
+
+                if (gcCount != lastGCCount)
+                {
+                    Debug.Log($"[ProceduralObjects] GC happened during last sort. GC Count reads {gcCount}.");
+                    lastGCCount = gcCount;
+                }
+                if (monoSize > 0)
+                {
+                    Debug.Log($"[ProceduralObjects] Profiler returned MonoUsedSize reads {monoSize}.");
+                }
+
+                if (recorder.isValid)
+                {
+                    gcAllocCount = recorder.sampleBlockCount;
+                    Debug.Log(string.Format("[ProceduralObjects] Total sorting time consumed {0} ms, sorting equivalentDictCache consumed {1} ms to complete, recorder observed {2} sample block count.",
+                        totalTime, sortTime, gcAllocCount));
+                } 
+                else
+                {
+                    Debug.Log(string.Format("[ProceduralObjects] Total sorting time consumed {0} ms, sorting equivalentDictCache consumed {1} ms to complete.",
+                        totalTime, sortTime));
+                }
 
 
                 // Original Version
@@ -4490,18 +4526,18 @@ namespace ProceduralObjects
              return dictionary;
          } */
 
-        public class Tuple<T1, T2, T3>
-        {
-            public T1 First { get; private set; }
-            public T2 Second { get; private set; }
-            public T3 Third { get; private set; }
-            internal Tuple(T1 first, T2 second, T3 third)
-            {
-                First = first;
-                Second = second;
-                Third = third;
-            }
-        }
+        //public class Tuple<T1, T2, T3>
+        //{
+        //    public T1 First { get; private set; }
+        //    public T2 Second { get; private set; }
+        //    public T3 Third { get; private set; }
+        //    internal Tuple(T1 first, T2 second, T3 third)
+        //    {
+        //        First = first;
+        //        Second = second;
+        //        Third = third;
+        //    }
+        //}
 
         //public struct MatrixShadowColor
         //{
