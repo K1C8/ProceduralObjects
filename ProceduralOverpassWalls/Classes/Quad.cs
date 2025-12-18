@@ -24,8 +24,8 @@ namespace ProceduralObjects.Classes
         public Dictionary<string, List<MeshProperties>> batchCustomArrayDict;
         public Dictionary<string, List<MeshProperties>> batchOriginalArrayDict;
         public List<int> unbatchableList;
-        private int _level;
-        private int _maxLevel;
+        private readonly int _level;
+        private readonly int _maxLevel;
 
         private int _maxPoCount = 4096;
         private int _repeateModifiedMeshCount = 0;
