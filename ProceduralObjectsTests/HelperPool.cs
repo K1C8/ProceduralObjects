@@ -2,37 +2,35 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.Threading;
-using UnityEngine;
-using static ProceduralObjects.ProceduralObjectsLogic;
+using System.Threading.Tasks;
 
-namespace ProceduralObjects.Classes
+namespace ProceduralObjectsTests
 {
-    internal static class HelperPool
+    internal static class HelperPool<T>
     {
-        static readonly Stack<Dictionary<int, List<MeshProperties>>> dictionaryPool = new Stack<Dictionary<int, List<MeshProperties>>>(32);
+        static readonly Stack<Dictionary<int, List<T>>> dictionaryPool = new Stack<Dictionary<int, List<T>>>(32);
         static readonly Stack<List<int>> intListPool = new Stack<List<int>>(32);
         static readonly Stack<HashSet<int>> visibilitySetPool = new Stack<HashSet<int>>(32);
-        static readonly ThreadLocal<Stack<List<MeshProperties>>> localMeshPropsPool = new ThreadLocal<Stack<List<MeshProperties>>>(() => new Stack<List<MeshProperties>>(8));
+        static readonly ThreadLocal<Stack<List<T>>> localGenericPool = new ThreadLocal<Stack<List<T>>>(() => new Stack<List<T>>(8));
 
         private static readonly object setLock = new object();
         private static readonly object dictLock = new object();
         private static readonly object customListLock = new object();
 
-        public static Dictionary<int, List<MeshProperties>> GetIntMeshPropDict()
+        public static Dictionary<int, List<T>> GetIntGenericDict()
         {
             lock (dictLock)
             {
-                return dictionaryPool.Count > 0 ? dictionaryPool.Pop() : new Dictionary<int, List<MeshProperties>>();
+                return dictionaryPool.Count > 0 ? dictionaryPool.Pop() : new Dictionary<int, List<T>>();
             }
         }
 
-        public static void ReturnIntMeshPropDict(Dictionary<int, List<MeshProperties>> dict)
+        public static void ReturnIntGenericDict(Dictionary<int, List<T>> dict)
         {
             foreach (var pair in dict)
             {
                 pair.Value.Clear();
-                ReturnMeshPropsList(pair.Value);
+                ReturnGenericList(pair.Value);
             }
 
             dict.Clear();
@@ -42,15 +40,15 @@ namespace ProceduralObjects.Classes
             }
         }
 
-        public static List<MeshProperties> GetMeshPropsList()
+        public static List<T> GetGenericList()
         {
-            return localMeshPropsPool.Value.Count > 0 ? localMeshPropsPool.Value.Pop() : new List<MeshProperties>();
+            return localGenericPool.Value.Count > 0 ? localGenericPool.Value.Pop() : new List<T>();
         }
 
-        public static void ReturnMeshPropsList(List<MeshProperties> list)
+        public static void ReturnGenericList(List<T> list)
         {
             list.Clear();
-            localMeshPropsPool.Value.Push(list);
+            localGenericPool.Value.Push(list);
         }
 
         public static List<int> GetIntList()
