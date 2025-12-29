@@ -823,7 +823,7 @@ namespace ProceduralObjects.Classes
 
             Vector3 screenPoint = cam.WorldToScreenPoint(obj.m_position);
             if (screenPoint.z >= 0)
-                obj._insideUIview = infiniteDist || (obj._squareDistToCam <= Mathf.Max(sqrRd * 0.7f, sqrDynMinThreshold));
+                obj._insideUIview = infiniteDist || (obj._squareDistToCam <= Mathf.Max(sqrRd, sqrDynMinThreshold)); // * 0.7f, sqrDynMinThreshold));  // Why 0.7f multiplied to sqrRd? Seems all distances here are square distance.
             else
                 obj._insideUIview = false;
 
@@ -836,23 +836,26 @@ namespace ProceduralObjects.Classes
             SortingLists sortingList, Dictionary<string, List<int>> seqDict, Dictionary<string, List<MeshProperties>> propsDict, 
             HashSet<int> set)
         {
-            foreach (string key in seqDict.Keys)
+            foreach (KeyValuePair<string, List<int>> kv in seqDict)
             {
-                if (seqDict[key].Count > 0)
+                if (kv.Value.Count > 0)
                 {
-                    int headSeq = seqDict[key][0];
-                    if (!sortingList.localBatchDict.TryGetValue(headSeq, out _))
+                    int headSeq = kv.Value[0];
+                    if (!sortingList.localBatchDict.TryGetValue(headSeq, out List<MeshProperties> list))
+                    {
                         sortingList.localBatchDict[headSeq] = HelperPool.GetMeshPropsList();
-                    List<MeshProperties> list = sortingList.localBatchDict[headSeq];
+                        list = sortingList.localBatchDict[headSeq];
+                    }
+                    //List<MeshProperties> list = sortingList.localBatchDict[headSeq];
                     //equivalentMtlDict.GetOrAdd(head.m_mesh, head.m_material);
 
-                    for (int j = 0; j < seqDict[key].Count; j++)
+                    for (int j = 0; j < kv.Value.Count; j++)
                     {
-                        int poSeq = seqDict[key][j];
+                        int poSeq = kv.Value[j];
                         //var obj = instance.proceduralObjects[poSeq];
 
                         if (set.Contains(poSeq))
-                            list.Add(propsDict[key][j]);
+                            list.Add(propsDict[kv.Key][j]);
                     }
                     //list.AddRange(propsDict[key]);
                 }
