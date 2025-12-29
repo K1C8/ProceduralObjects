@@ -111,8 +111,10 @@ namespace ProceduralObjects
         private double poDrawMeshTimeSum;
         private double poUpdateTimeSum;
         private DateTime lastRenderTime;
-        private ConcurrentDictionary<int, List<MeshProperties>> equivalentDict
-                    = new ConcurrentDictionary<int, List<MeshProperties>>();
+        private readonly ConcurrentDictionary<int, MeshProperties[]> equivalentDict
+             = new ConcurrentDictionary<int, MeshProperties[]>();
+        private readonly ConcurrentDictionary<int, int> equivalentDictUsageTracker
+            = new ConcurrentDictionary<int, int>();
         //private ConcurrentDictionary<Mesh, Material> equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
         private List<int> customList = new List<int>();
         //private List<int> overlayList = new List<int>();
@@ -250,7 +252,7 @@ namespace ProceduralObjects
 
             // Tests for DrawMeshInstanced on props with meshStatus==1
             isGPUSupportInstancing = SystemInfo.supportsInstancing; 
-            equivalentDict = new ConcurrentDictionary<int, List<MeshProperties>>();
+            //equivalentDict = new ConcurrentDictionary<int, List<MeshProperties>>();
             //equivalentDictCache = new Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]>();
             //equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
             customList = new List<int>();
@@ -444,22 +446,22 @@ namespace ProceduralObjects
                 Vector3 camPos = renderCamera.transform.position;
 
                 Parallel.For(0, viewportPoSeqList.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCount },
-                    () => HelperPool.GetVisibilitySet(),
-                    (i, loop, localSet) =>
+                    () => HelperPool.GetIntList(),
+                    (i, loop, localList) =>
                 {
                     int poSeq = viewportPoSeqList[i];
                     var obj = proceduralObjects[poSeq];
                     if (ProceduralUtils.TestPoInViewAndProcess(obj, renderCamera, camPos, sqrDynMinThreshold, isNightTime))
-                        localSet.Add(poSeq);
-                    return localSet;
+                        localList.Add(poSeq);
+                    return localList;
 
-                }, localSet =>
+                }, localList =>
                 {
                     lock (listLock)
                     {
-                        visibilitySet.UnionWith(localSet);
+                        visibilitySet.UnionWith(localList);
                     }
-                    HelperPool.ReturnVisibilitySet(localSet);
+                    HelperPool.ReturnIntList(localList);
                 });
 
 
@@ -483,8 +485,8 @@ namespace ProceduralObjects
                     ProceduralUtils.ProcessBatchablePoDict(localLists, current.batchOriginalPoIdDict, current.batchOriginalArrayDict, visibilitySet);
                     ProceduralUtils.ProcessBatchablePoDict(localLists, current.batchCustomPoIdDict, current.batchCustomArrayDict, visibilitySet);
 
-                    Debug.Log($"[ProceduralObjects] Quad {current.bounds.center} has {localLists.localUnbatchedList.Count} POs are unbatched, and has" +
-                        $" {localLists.localBatchDict.Count} types of batched POs.");
+                    //Debug.Log($"[ProceduralObjects] Quad {current.bounds.center} has {localLists.localUnbatchedList.Count} POs are unbatched, and has" +
+                    //    $" {localLists.localBatchDict.Count} types of batched POs.");
 
                     return localLists;
                 }, localLists =>
@@ -495,14 +497,31 @@ namespace ProceduralObjects
                         {
                             if (kv.Value == null)
                                 continue;
-                            if (!equivalentDict.TryGetValue(kv.Key, out List<MeshProperties> existing))
+                            if (!equivalentDict.TryGetValue(kv.Key, out MeshProperties[] existing) || !equivalentDictUsageTracker.ContainsKey(kv.Key))
                             {
-                                existing = new List<MeshProperties>(kv.Value.Count);
+                                existing = new MeshProperties[kv.Value.Count];
+                                equivalentDict[kv.Key] = existing;
+                                equivalentDictUsageTracker[kv.Key] = 0;
+                            }
+                            else if (equivalentDict[kv.Key].Length - equivalentDictUsageTracker[kv.Key] < kv.Value.Count)
+                            {
+                                int newSize = equivalentDict[kv.Key].Length << 1;
+                                while (newSize < kv.Value.Count + equivalentDictUsageTracker[kv.Key])
+                                {
+                                    newSize <<= 1;
+                                }
+                                Debug.Log($"[ProceduralObjects] Processing result, current list {kv.Key} needs to be expanded to new capacity {newSize}.");
+                                existing = new MeshProperties[newSize];
+                                equivalentDict[kv.Key].CopyTo(existing, 0);
                                 equivalentDict[kv.Key] = existing;
                             }
                             if (kv.Value.Count > 0)
-                                existing.AddRange(kv.Value);
-                            //Debug.Log($"[ProceduralObjects] Processing result from thread {tid}, current list {kv.Key.name} with {kv.Value.Count} instances. List length {existing.Count}");
+                            {
+                                //existing.AddRange(kv.Value);
+                                kv.Value.CopyTo(equivalentDict[kv.Key], equivalentDictUsageTracker[kv.Key]);
+                                equivalentDictUsageTracker[kv.Key] += kv.Value.Count;
+                                //Debug.Log($"[ProceduralObjects] Processing result, current list {kv.Key} with {kv.Value.Count} instances. List length {equivalentDictUsageTracker[kv.Key]}, capacity at {existing.Length}");
+                            }
                         }
                     }
                     if (localLists.localUnbatchedList.Count > 0)
@@ -521,41 +540,50 @@ namespace ProceduralObjects
 
                 //MeshProperties currItem;
 
-                foreach (var pair in equivalentDict)
+                uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
+                foreach (var kv in equivalentDict)
                 {
-                    int size = pair.Value.Count;
-                    Debug.Log($"[ProceduralObjects] Processing result. Current list head {pair.Key} with {pair.Value.Count} instances.");
+                    int size = equivalentDictUsageTracker[kv.Key];
+                    Debug.Log($"[ProceduralObjects] Processing result. Current list head {kv.Key} with {size} instances.");
                     // Processing blank queue/list in equivalentDict.
                     if (size <= 0)
                     {
-                        equivalentDict.TryRemove(pair.Key, out _);
+                        //equivalentDict.TryRemove(pair.Key, out _);
                         //equivalentMtlDict.TryRemove(pair.Key, out _);
                         continue;
                     }
 
-                    if (!equivalentPropertiesComputeBuffer.ContainsKey(pair.Key))
+                    if (!equivalentPropertiesComputeBuffer.ContainsKey(kv.Key))
                     {
-                        equivalentPropertiesComputeBuffer.Add(pair.Key, new ComputeBuffer(size, MeshProperties.Size()));
+                        equivalentPropertiesComputeBuffer.Add(kv.Key, new ComputeBuffer(size, MeshProperties.Size()));
                     }
-                    if (!equivalentArgsComputeBuffer.ContainsKey(pair.Key))
+                    // TODO: Not fully tested.
+                    else if (equivalentPropertiesComputeBuffer[kv.Key].count < size)
                     {
-                        equivalentArgsComputeBuffer.Add(pair.Key, new ComputeBuffer(1, 5 * sizeof(uint), ComputeBufferType.IndirectArguments));
+                        equivalentPropertiesComputeBuffer[kv.Key].Dispose();
+                        equivalentPropertiesComputeBuffer[kv.Key] = new ComputeBuffer(size, MeshProperties.Size());
                     }
-                    Mesh mesh = proceduralObjects[pair.Key].m_mesh;
-                    ComputeBuffer argsBuffer = equivalentArgsComputeBuffer[pair.Key];
-                    uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
+                    if (!equivalentArgsComputeBuffer.ContainsKey(kv.Key))
+                    {
+                        equivalentArgsComputeBuffer.Add(kv.Key, new ComputeBuffer(1, 5 * sizeof(uint), ComputeBufferType.IndirectArguments));
+                    }
+                    Mesh mesh = proceduralObjects[kv.Key].m_mesh;
+                    ComputeBuffer argsBuffer = equivalentArgsComputeBuffer[kv.Key];
                     args[0] = mesh.GetIndexCount(0);
                     args[1] = (uint)size;
                     args[2] = mesh.GetIndexStart(0);
 
-                    ComputeBuffer meshPropertiesBuffer = equivalentPropertiesComputeBuffer[pair.Key];
+                    ComputeBuffer meshPropertiesBuffer = equivalentPropertiesComputeBuffer[kv.Key];
 
-                    MeshProperties[] propertiesArray = pair.Value.ToArray();
+                    //MeshProperties[] propertiesArray = pair.Value.ToArray();
 
-                    pair.Value.Clear();
+                    //pair.Value.Clear();
 
                     argsBuffer.SetData(args);
-                    meshPropertiesBuffer.SetData(propertiesArray);
+                    meshPropertiesBuffer.SetData(kv.Value);
+
+                    Array.Clear(kv.Value, 0, kv.Value.Length);
+                    equivalentDictUsageTracker[kv.Key] = 0;
 
                 }
 
