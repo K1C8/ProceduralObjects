@@ -126,6 +126,7 @@ namespace ProceduralObjects
         //private Dictionary<Mesh, Vector4[]> equivalentColorDictCache;
         private Dictionary<int, ComputeBuffer> equivalentPropertiesComputeBuffer;
         private Dictionary<int, ComputeBuffer> equivalentArgsComputeBuffer;
+        private uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
         private QuadTree quadTree;
         object dictLock = new object();
         object listLock = new object();
@@ -417,7 +418,7 @@ namespace ProceduralObjects
 
             quadTree.DrawQuadBounds();
 
-            if (proceduralObjects != null && timeFromLastUpdate >= 20.0)
+            if (proceduralObjects != null) // && timeFromLastUpdate >= 20.0)
             {
                 customList.Clear();
                 //overlayList.Clear(); 
@@ -470,10 +471,12 @@ namespace ProceduralObjects
                 //Debug.Log("[ProceduralObjects] Max thread count is " + maxThreadCount);
 
                 Parallel.For(0, visibleLeafQuads.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCount }, 
-                    () => new SortingLists(HelperPool.GetIntMeshPropDict(), HelperPool.GetIntList()),
+                    () => new SortingLists(HelperPool.GetIntMeshPropDict(), HelperPool.GetIntList()), //, HelperPool.GetVisibilitySet()),
                     (i, loop, localLists) =>
                 {
                     Quad current = visibleLeafQuads[i];
+                    //List<int> quadPoSeqList = current.allPoIdList;
+                    //ProceduralUtils.TestPoInQuadAndProcess(quadPoSeqList, renderCamera, camPos, sqrDynMinThreshold, isNightTime, localLists.localVisibilitySet);
                     for (int j = 0; j < current.unbatchableList.Count; j ++)
                     {
                         int poSeq = current.unbatchableList[j];
@@ -534,17 +537,17 @@ namespace ProceduralObjects
 
                     HelperPool.ReturnIntMeshPropDict(localLists.localBatchDict);
                     HelperPool.ReturnIntList(localLists.localUnbatchedList);
+                    //HelperPool.ReturnVisibilitySet(localLists.localVisibilitySet);
                 });
 
                 DateTime sortStartTime = DateTime.Now;
 
                 //MeshProperties currItem;
 
-                uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
                 foreach (var kv in equivalentDict)
                 {
                     int size = equivalentDictUsageTracker[kv.Key];
-                    Debug.Log($"[ProceduralObjects] Processing result. Current list head {kv.Key} with {size} instances.");
+                    //Debug.Log($"[ProceduralObjects] Processing result. Current list head {kv.Key} with {size} instances.");
                     // Processing blank queue/list in equivalentDict.
                     if (size <= 0)
                     {
@@ -560,7 +563,8 @@ namespace ProceduralObjects
                     // TODO: Not fully tested.
                     else if (equivalentPropertiesComputeBuffer[kv.Key].count < size)
                     {
-                        equivalentPropertiesComputeBuffer[kv.Key].Dispose();
+                        equivalentPropertiesComputeBuffer.TryGetValue(kv.Key, out ComputeBuffer bufferToUpdate);
+                        bufferToUpdate.Release();
                         equivalentPropertiesComputeBuffer[kv.Key] = new ComputeBuffer(size, MeshProperties.Size());
                     }
                     if (!equivalentArgsComputeBuffer.ContainsKey(kv.Key))
@@ -568,12 +572,12 @@ namespace ProceduralObjects
                         equivalentArgsComputeBuffer.Add(kv.Key, new ComputeBuffer(1, 5 * sizeof(uint), ComputeBufferType.IndirectArguments));
                     }
                     Mesh mesh = proceduralObjects[kv.Key].m_mesh;
-                    ComputeBuffer argsBuffer = equivalentArgsComputeBuffer[kv.Key];
                     args[0] = mesh.GetIndexCount(0);
                     args[1] = (uint)size;
                     args[2] = mesh.GetIndexStart(0);
 
                     ComputeBuffer meshPropertiesBuffer = equivalentPropertiesComputeBuffer[kv.Key];
+                    ComputeBuffer argsBuffer = equivalentArgsComputeBuffer[kv.Key];
 
                     //MeshProperties[] propertiesArray = pair.Value.ToArray();
 
@@ -704,6 +708,20 @@ namespace ProceduralObjects
 
                     foreach (var pair in equivalentDict)
                     {
+                        if (pair.Value.Length <= 0)
+                        {
+                            continue;
+                        }
+                        if (!equivalentArgsComputeBuffer.ContainsKey(pair.Key))
+                        {
+                            Debug.Log($"[ProceduralObjects] Key {pair.Key} could not find in equivalentArgsComputeBuffer during rendering process.");
+                            continue;
+                        }
+                        if (!equivalentPropertiesComputeBuffer.ContainsKey(pair.Key))
+                        {
+                            Debug.Log($"[ProceduralObjects] Key {pair.Key} could not find in equivalentPropertiesComputeBuffer during rendering process.");
+                            continue;
+                        }
                         ComputeBuffer argsBuffer = equivalentArgsComputeBuffer[pair.Key];
                         ComputeBuffer meshPropertiesBuffer = equivalentPropertiesComputeBuffer[pair.Key];
                         Mesh mesh = proceduralObjects[pair.Key].m_mesh;
@@ -4624,11 +4642,13 @@ namespace ProceduralObjects
         {
             public Dictionary<int, List<MeshProperties>> localBatchDict;
             public List<int> localUnbatchedList;
+            //public HashSet<int> localVisibilitySet;
 
-            public SortingLists(Dictionary<int, List<MeshProperties>> dict,  List<int> list)
+            public SortingLists(Dictionary<int, List<MeshProperties>> dict,  List<int> list) //, HashSet<int> set)
             {
                 localBatchDict = dict;
                 localUnbatchedList = list;
+                //localVisibilitySet = set;
             }
         }
 

@@ -30,6 +30,7 @@ namespace ProceduralObjects.Classes
         private int _maxPoCount = 4096;
         private int _repeateModifiedMeshCount = 0;
         private int _unmodifiedMeshCount = 0;
+        private int _minimumBatchSize = 3;
 
         // Debug line boxes
         GameObject lineObject;
@@ -136,8 +137,8 @@ namespace ProceduralObjects.Classes
                         {
                             int listHead = batchCustomPoIdDict[objHashStr][0];
 
-                            if ((obj.m_textParameters == null && proceduralObjects[listHead].m_textParameters == null) ||
-                                (!IsDifference(obj.m_textParameters, proceduralObjects[listHead].m_textParameters)) &&
+                            if (((obj.m_textParameters == null && proceduralObjects[listHead].m_textParameters == null) ||
+                                (!IsDifference(obj.m_textParameters, proceduralObjects[listHead].m_textParameters))) &&
                                 CheckMeshEquivalance(obj.m_mesh.vertices, proceduralObjects[listHead].m_mesh.vertices))
                             {
                                 batchCustomArrayDict[objHashStr].Add(
@@ -153,22 +154,63 @@ namespace ProceduralObjects.Classes
                     }
                 }
 
+                List<string> keysToRemove = new List<string>();
                 foreach (var kv in batchCustomPoIdDict)
                 {
-                    if (kv.Value.Count > 1)
+                    if (kv.Value.Count >= _minimumBatchSize)
                     {
                         _repeateModifiedMeshCount += kv.Value.Count;
                         Debug.Log($"[ProceduralObjects] Quad {bounds.center} loaded repeated meshStatus 2 meshes, meshId: {kv.Key}, count: {kv.Value.Count}");
                     }
+                    else
+                    {
+                        for (int i = 0; i < kv.Value.Count; i++)
+                        {
+                            int poSeq = kv.Value[i];
+                            unbatchableList.Add(poSeq);
+                        }
+                        keysToRemove.Add(kv.Key);
+                    }
+                }
+                for (int i = 0; i < keysToRemove.Count; i++)
+                {
+                    string keyToRemove = keysToRemove[i];
+                    batchCustomArrayDict.Remove(keyToRemove);
+                    batchCustomPoIdDict.Remove(keyToRemove);
                 }
 
+                keysToRemove.Clear();
                 foreach (var kv in batchOriginalPoIdDict)
                 {
-                     Debug.Log($"[ProceduralObjects] Quad {bounds.center} loaded unmodified meshStatus 1 meshes, meshId: {kv.Key}, count: {kv.Value.Count}");
+                    if (kv.Value.Count >= _minimumBatchSize)
+                    {
+                        Debug.Log($"[ProceduralObjects] Quad {bounds.center} loaded batchable unmodified meshStatus 1 meshes, meshId: {kv.Key}, count: {kv.Value.Count}");
+                    }
+                    else
+                    {
+                        for (int i = 0; i < kv.Value.Count; i++)
+                        {
+                            int poSeq = kv.Value[i];
+                            unbatchableList.Add(poSeq);
+                        }
+
+                        keysToRemove.Add(kv.Key);
+
+                    }
                 }
 
-                Debug.Log($"[ProceduralObjects] In Quad {bounds.center}, total unmodified meshStatus 1 meshes count: {_unmodifiedMeshCount}, " +
-                    $"total repeated meshStatus 2 meshes count: {_repeateModifiedMeshCount}");
+                for (int i = 0; i < keysToRemove.Count; i++)
+                {
+                    string keyToRemove = keysToRemove[i];
+                    batchOriginalArrayDict.Remove(keyToRemove);
+                    batchOriginalPoIdDict.Remove(keyToRemove);
+                }
+
+                if (_unmodifiedMeshCount + _repeateModifiedMeshCount > 0)
+                {
+                    Debug.Log($"[ProceduralObjects] In Quad {bounds.center}, total batchable unmodified meshStatus 1 meshes counting at: {_unmodifiedMeshCount}, " +
+                        $"total batchable repeated meshStatus 2 meshes counting at: {_repeateModifiedMeshCount}");
+                }
 
             }
             

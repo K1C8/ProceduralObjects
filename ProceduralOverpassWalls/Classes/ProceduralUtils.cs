@@ -4,6 +4,7 @@ using ProceduralObjects.Tools;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -250,6 +251,7 @@ namespace ProceduralObjects.Classes
                 try
                 {
                     var obj = new ProceduralObject(c, logic.layerManager, props, buildings);
+                    Debug.Log($"[ProceduralObjects] Loading data for proceduralObjects number {logic.proceduralObjects.Count}, from container.id: {c.id}. Container object name is {obj._baseProp.name}, container meshStatus {c.meshStatus}.");
                     if (obj.meshStatus != 1)
                     {
                         if (obj.RequiresUVRecalculation && !obj.disableRecalculation)
@@ -831,31 +833,70 @@ namespace ProceduralObjects.Classes
             return true;
         }
 
+        public static void TestPoInQuadAndProcess(List<int> quadPoSeqList, Camera cam, Vector3 camPos, float sqrDynMinThreshold, bool isNightTime, HashSet<int> VisibilitySet)
+        {
+            int viewportPoSeqListCount = quadPoSeqList.Count;
+            List<int> VisibilityList = HelperPool.GetIntList();
+
+            for (int i = 0; i < viewportPoSeqListCount; i++)
+            {
+                int poSeq = quadPoSeqList[i];
+                var obj = instance.proceduralObjects[poSeq];
+
+                if ((obj.layer != null && obj.layer.m_isHidden) || !RenderOptions.instance.CanRenderSingle(obj, isNightTime))
+                    continue;
+
+                bool infiniteDist = obj.renderDistance >= 16001;
+                obj._squareDistToCam = (camPos - obj.m_position).sqrMagnitude;
+
+                float sqrRd = obj.renderDistance * RenderOptions.instance.globalMultiplier;
+                sqrRd *= sqrRd;
+                obj._insideRenderView = infiniteDist || obj._squareDistToCam <= sqrRd;
+
+                if (!obj._insideRenderView)
+                {
+                    obj._insideUIview = false;
+                    continue;
+                }
+
+                Vector3 screenPoint = cam.WorldToScreenPoint(obj.m_position);
+                if (screenPoint.z >= 0)
+                    obj._insideUIview = infiniteDist || (obj._squareDistToCam <= Mathf.Max(sqrRd, sqrDynMinThreshold));
+                else
+                    obj._insideUIview = false;
+
+                VisibilityList.Add(poSeq);
+            }
+            VisibilitySet.UnionWith(VisibilityList);
+            HelperPool.ReturnIntList(VisibilityList);
+        }
+
 
         public static void ProcessBatchablePoDict(
-            SortingLists sortingList, Dictionary<string, List<int>> seqDict, Dictionary<string, List<MeshProperties>> propsDict, 
-            HashSet<int> set)
+            SortingLists sortingList, Dictionary<string, List<int>> seqDict, Dictionary<string, List<MeshProperties>> meshPropertiesDict, 
+            HashSet<int> visibleSet)
         {
             foreach (KeyValuePair<string, List<int>> kv in seqDict)
             {
                 if (kv.Value.Count > 0)
                 {
                     int headSeq = kv.Value[0];
-                    if (!sortingList.localBatchDict.TryGetValue(headSeq, out List<MeshProperties> list))
+                    if (!sortingList.localBatchDict.TryGetValue(headSeq, out List<MeshProperties> frameCacheDictList))
                     {
                         sortingList.localBatchDict[headSeq] = HelperPool.GetMeshPropsList();
-                        list = sortingList.localBatchDict[headSeq];
+                        frameCacheDictList = sortingList.localBatchDict[headSeq];
                     }
                     //List<MeshProperties> list = sortingList.localBatchDict[headSeq];
                     //equivalentMtlDict.GetOrAdd(head.m_mesh, head.m_material);
 
+                    List<MeshProperties> quadBatchDictMeshPropertiesList = meshPropertiesDict[kv.Key];
                     for (int j = 0; j < kv.Value.Count; j++)
                     {
                         int poSeq = kv.Value[j];
                         //var obj = instance.proceduralObjects[poSeq];
 
-                        if (set.Contains(poSeq))
-                            list.Add(propsDict[kv.Key][j]);
+                        if (visibleSet.Contains(poSeq))
+                            frameCacheDictList.Add(quadBatchDictMeshPropertiesList[j]);
                     }
                     //list.AddRange(propsDict[key]);
                 }
