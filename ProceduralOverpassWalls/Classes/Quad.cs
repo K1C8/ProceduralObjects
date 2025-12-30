@@ -91,35 +91,36 @@ namespace ProceduralObjects.Classes
                             _unmodifiedMeshCount++;
                             continue;
                         }
-                        Vector3[] vertices = obj.m_mesh.vertices;
-                        MemoryStream stream = new MemoryStream();
-                        Serializer.Serialize(stream, SerializableVector3.ToSerializableArray(vertices));
-                        stream.Position = 0;
-                        byte[] meshHashBytes = sha1.ComputeHash(stream);
-                        stream.Close();
+                        //Vector3[] vertices = obj.m_mesh.vertices;
+                        //MemoryStream stream = new MemoryStream();
+                        //Serializer.Serialize(stream, SerializableVector3.ToSerializableArray(vertices));
+                        //stream.Position = 0;
+                        //byte[] meshHashBytes = sha1.ComputeHash(stream);
+                        //stream.Close();
 
-                        StringBuilder sb = new StringBuilder(obj._baseProp.name);
-                        sb.Append("_");
-                        for (int i = 0; i < meshHashBytes.Length; i++)
-                            sb.Append(meshHashBytes[i].ToString("X2"));
-                        sb.Append("_");
+                        //StringBuilder sb = new StringBuilder(obj._baseProp.name);
+                        //sb.Append("_");
+                        //for (int i = 0; i < meshHashBytes.Length; i++)
+                        //    sb.Append(meshHashBytes[i].ToString("X2"));
+                        //sb.Append("_");
 
-                        if (obj.m_textParameters != null)
-                        {
-                            stream = new MemoryStream();
-                            Serializer.Serialize(stream, obj.m_textParameters);
-                            stream.Position = 0;
-                            byte[] textParamHashBytes = sha1.ComputeHash(stream);
-                            stream.Close();
-                            for (int i = 0; i < textParamHashBytes.Length; i++)
-                                sb.Append(textParamHashBytes[i].ToString("X2"));
-                        }
-                        else
-                            sb.Append("NO_TEXTPARAMETERS");
+                        //if (obj.m_textParameters != null)
+                        //{
+                        //    stream = new MemoryStream();
+                        //    Serializer.Serialize(stream, obj.m_textParameters);
+                        //    stream.Position = 0;
+                        //    byte[] textParamHashBytes = sha1.ComputeHash(stream);
+                        //    stream.Close();
+                        //    for (int i = 0; i < textParamHashBytes.Length; i++)
+                        //        sb.Append(textParamHashBytes[i].ToString("X2"));
+                        //}
+                        //else
+                        //    sb.Append("NO_TEXTPARAMETERS");
 
-                        //string meshHash = sb.ToString();
-                        //string propName = obj._baseProp.name;
-                        string objHashStr = sb.ToString();
+                        ////string meshHash = sb.ToString();
+                        ////string propName = obj._baseProp.name;
+                        //string objHashStr = sb.ToString();
+                        string objHashStr = GetObjHashString(obj, sha1);
                         if (!batchCustomArrayDict.ContainsKey(objHashStr))
                         {
                             batchCustomArrayDict[objHashStr] = new List<MeshProperties> 
@@ -316,6 +317,37 @@ namespace ProceduralObjects.Classes
                 for (int i = 0; i < children.Length; i++)
                     children[i].DrawQuadBounds();
             }
+        }
+
+        public string GetObjHashString(ProceduralObject obj, SHA1 sha1)
+        {
+            Vector3[] vertices = obj.m_mesh.vertices;
+            MemoryStream stream = new MemoryStream();
+            Serializer.Serialize(stream, SerializableVector3.ToSerializableArray(vertices));
+            stream.Position = 0;
+            byte[] meshHashBytes = sha1.ComputeHash(stream);
+            stream.Close();
+
+            StringBuilder sb = new StringBuilder(obj._baseProp.name);
+            sb.Append("_");
+            for (int i = 0; i < meshHashBytes.Length; i++)
+                sb.Append(meshHashBytes[i].ToString("X2"));
+            sb.Append("_");
+
+            if (obj.m_textParameters != null)
+            {
+                stream = new MemoryStream();
+                Serializer.Serialize(stream, obj.m_textParameters);
+                stream.Position = 0;
+                byte[] textParamHashBytes = sha1.ComputeHash(stream);
+                stream.Close();
+                for (int i = 0; i < textParamHashBytes.Length; i++)
+                    sb.Append(textParamHashBytes[i].ToString("X2"));
+            }
+            else
+                sb.Append("NO_TEXTPARAMETERS");
+
+            return sb.ToString();
         }
     }
 }

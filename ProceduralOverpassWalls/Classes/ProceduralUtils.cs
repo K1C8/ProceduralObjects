@@ -251,7 +251,8 @@ namespace ProceduralObjects.Classes
                 try
                 {
                     var obj = new ProceduralObject(c, logic.layerManager, props, buildings);
-                    Debug.Log($"[ProceduralObjects] Loading data for proceduralObjects number {logic.proceduralObjects.Count}, from container.id: {c.id}. Container object name is {obj._baseProp.name}, container meshStatus {c.meshStatus}.");
+                    string baseName = obj._baseProp == null ? obj._baseBuilding.name : obj._baseProp.name;
+                    Debug.Log($"[ProceduralObjects] Loading data for proceduralObjects number {logic.proceduralObjects.Count}, from container.id: {c.id}. Container object name is {baseName}, container meshStatus {c.meshStatus}.");
                     if (obj.meshStatus != 1)
                     {
                         if (obj.RequiresUVRecalculation && !obj.disableRecalculation)
