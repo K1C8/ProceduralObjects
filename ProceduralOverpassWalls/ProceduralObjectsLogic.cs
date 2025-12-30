@@ -93,10 +93,11 @@ namespace ProceduralObjects
         public MeasurementsManager measurementsManager;
         public SelectionFilters filters;
 
-        //public long allocBytes;
-        public long monoSize;
-        public long gcAllocCount;
         public int lastGCCount;
+        public double cacheSortTime;
+        public double totalBatchingTime;
+        public int totalBatchCount;
+        public int totalBatchedPoCount;
 
         public bool showLayerSetScroll = false, showMoreTools = false;
         private Vector2 scrollLayerSet = Vector2.zero;
@@ -130,7 +131,6 @@ namespace ProceduralObjects
         private QuadTree quadTree;
         object dictLock = new object();
         object listLock = new object();
-        Recorder recorder;
 
         //private ComputeBuffer[] argsBufferArray;
         //private ComputeBuffer meshPropertiesBuffer;
@@ -196,9 +196,6 @@ namespace ProceduralObjects
             moduleManager = new ModuleManager(this);
             measurementsManager = new MeasurementsManager(this);
             filters = new SelectionFilters();
-            recorder = Recorder.Get("GC.Alloc");
-            recorder.enabled = false;
-            recorder.enabled = true;
             lastGCCount = GC.CollectionCount(0); 
 
             double fontAndMiscGUILoadingTime = Math.Round((DateTime.Now - fontAndMiscGUILoadStartTime).TotalSeconds, 2);
@@ -421,6 +418,10 @@ namespace ProceduralObjects
             if (proceduralObjects != null) // && timeFromLastUpdate >= 20.0)
             {
                 customList.Clear();
+                foreach (KeyValuePair<int, int> kv in equivalentDictUsageTracker)
+                {
+                    equivalentDictUsageTracker[kv.Key] = 0;
+                }
                 //overlayList.Clear(); 
 
                 List<Quad> leafQuads = quadTree.GetLeafQuads();
@@ -500,28 +501,34 @@ namespace ProceduralObjects
                         {
                             if (kv.Value == null)
                                 continue;
-                            if (!equivalentDict.TryGetValue(kv.Key, out MeshProperties[] existing) || !equivalentDictUsageTracker.ContainsKey(kv.Key))
+                            MeshProperties[] existing;
+                            if (!equivalentDict.TryGetValue(kv.Key, out existing) || !equivalentDictUsageTracker.ContainsKey(kv.Key))
                             {
                                 existing = new MeshProperties[kv.Value.Count];
                                 equivalentDict[kv.Key] = existing;
                                 equivalentDictUsageTracker[kv.Key] = 0;
                             }
-                            else if (equivalentDict[kv.Key].Length - equivalentDictUsageTracker[kv.Key] < kv.Value.Count)
+                            else if (existing.Length - equivalentDictUsageTracker[kv.Key] < kv.Value.Count)
                             {
-                                int newSize = equivalentDict[kv.Key].Length << 1;
+                                Debug.Log($"[ProceduralObjects] Processing result, current list {kv.Key} needs to be expanded to new capacity.");
+                                int newSize = existing.Length << 1;
+                                if (newSize == 0)
+                                {
+                                    newSize = 2;
+                                }    
                                 while (newSize < kv.Value.Count + equivalentDictUsageTracker[kv.Key])
                                 {
                                     newSize <<= 1;
                                 }
-                                Debug.Log($"[ProceduralObjects] Processing result, current list {kv.Key} needs to be expanded to new capacity {newSize}.");
                                 existing = new MeshProperties[newSize];
                                 equivalentDict[kv.Key].CopyTo(existing, 0);
                                 equivalentDict[kv.Key] = existing;
+                                Debug.Log($"[ProceduralObjects] Processing result, current list {kv.Key} has been expanded with a capacity of {newSize}.");
                             }
                             if (kv.Value.Count > 0)
                             {
                                 //existing.AddRange(kv.Value);
-                                kv.Value.CopyTo(equivalentDict[kv.Key], equivalentDictUsageTracker[kv.Key]);
+                                kv.Value.CopyTo(existing, equivalentDictUsageTracker[kv.Key]);
                                 equivalentDictUsageTracker[kv.Key] += kv.Value.Count;
                                 //Debug.Log($"[ProceduralObjects] Processing result, current list {kv.Key} with {kv.Value.Count} instances. List length {equivalentDictUsageTracker[kv.Key]}, capacity at {existing.Length}");
                             }
@@ -580,51 +587,31 @@ namespace ProceduralObjects
                     ComputeBuffer argsBuffer = equivalentArgsComputeBuffer[kv.Key];
 
                     //MeshProperties[] propertiesArray = pair.Value.ToArray();
-
                     //pair.Value.Clear();
 
                     argsBuffer.SetData(args);
                     meshPropertiesBuffer.SetData(kv.Value);
 
                     Array.Clear(kv.Value, 0, kv.Value.Length);
-                    equivalentDictUsageTracker[kv.Key] = 0;
+                    //equivalentDictUsageTracker[kv.Key] = 0; // Usage value is needed in later loops. Value clearing was moved to the top of the block.
 
                 }
 
-                
                 //viewportPoSeqList.Clear();
                 HelperPool.ReturnIntList(viewportPoSeqList);
                 HelperPool.ReturnVisibilitySet(visibilitySet);
                 leafQuads.Clear();
 
                 lastRenderTime = DateTime.Now;
-                double sortTime = Math.Round((DateTime.Now - sortStartTime).TotalMilliseconds, 2);
-                double totalTime = Math.Round((DateTime.Now - startTime).TotalMilliseconds, 2);
+                cacheSortTime = Math.Round((DateTime.Now - sortStartTime).TotalMilliseconds, 2);
+                totalBatchingTime = Math.Round((DateTime.Now - startTime).TotalMilliseconds, 2);
                 int gcCount = GC.CollectionCount(0);
-                monoSize = Profiler.GetMonoUsedSizeLong() / 1024 / 1024;
 
                 if (gcCount != lastGCCount)
                 {
                     Debug.Log($"[ProceduralObjects] GC happened during last sort. GC Count reads {gcCount}.");
                     lastGCCount = gcCount;
                 }
-                if (monoSize > 0)
-                {
-                    Debug.Log($"[ProceduralObjects] Profiler returned MonoUsedSize reads {monoSize}.");
-                }
-
-                if (recorder.isValid)
-                {
-                    gcAllocCount = recorder.sampleBlockCount;
-                    Debug.Log(string.Format("[ProceduralObjects] Total sorting time consumed {0} ms, sorting equivalentDictCache consumed {1} ms to complete, recorder observed {2} sample block count.",
-                        totalTime, sortTime, gcAllocCount));
-                } 
-                else
-                {
-                    Debug.Log(string.Format("[ProceduralObjects] Total sorting time consumed {0} ms, sorting equivalentDictCache consumed {1} ms to complete.",
-                        totalTime, sortTime));
-                }
-
 
                 // Original Version
                 /*for (int i = 0; i < proceduralObjects.Count; i++)
@@ -695,20 +682,18 @@ namespace ProceduralObjects
             {
                 try
                 {
-                    //int batchSizeLimit = 500;
-                    /*if (equivalentDict.Count > 0)
-                    {
-                        Debug.Log("[ProceduralObjects] Preparing DrawMeshInstanced with " + equivalentScratchpad.Count + " instanced mesh(es).");
-                    }*/
                     if (equivalentArgsComputeBuffer != null && equivalentArgsComputeBuffer.Count == 0 && frameCount % 100 == 0)
                     {
                         Debug.Log("[ProceduralObjects] DrawMesh code block has no instanced mesh(es) to draw.");
                     }
 
-
+                    totalBatchCount = 0;
+                    totalBatchedPoCount = 0;
                     foreach (var pair in equivalentDict)
                     {
-                        if (pair.Value.Length <= 0)
+                        int currentBatchSize = 0;
+                        
+                        if (!equivalentDictUsageTracker.TryGetValue(pair.Key, out currentBatchSize) || currentBatchSize == 0)
                         {
                             continue;
                         }
@@ -739,6 +724,8 @@ namespace ProceduralObjects
                         {
                             //Debug.Log(string.Format("[ProceduralObjects] Peeking first item in equivalentScratchpad list {0} iteration {1}, item with m4x4s {2}.", pair.Key.name, i, subMatrix4x4s[0].ToString()));
                             Graphics.DrawMeshInstancedIndirect(mesh, 0, material, new Bounds(Vector3.zero, new Vector3(10000.0f, 10000.0f, 10000.0f)), argsBuffer, 0, propertyBlock, ShadowCastingMode.On, true, 0, renderCamera);
+                            totalBatchCount++;
+                            totalBatchedPoCount += pair.Value.Length;
                         }
                         catch (Exception e)
                         {
@@ -778,6 +765,7 @@ namespace ProceduralObjects
                         }
                     }
 
+
                 }
                 catch (Exception e)
                 {
@@ -786,6 +774,9 @@ namespace ProceduralObjects
 
                 var poDrawMeshTime = Math.Round((DateTime.Now - startTime).TotalMilliseconds, 2) - poCalcTime;
                 poDrawMeshTimeSum += poDrawMeshTime;
+
+                Debug.Log(string.Format("[ProceduralObjects] Batching process consumed {0} ms, sorting equivalentDictCache consumed {1} ms to complete. {2} POs rendered batched, {3} POs rendered individually this frame.",
+                    totalBatchingTime, cacheSortTime, totalBatchedPoCount, customList.Count));
 
                 if (moduleManager.enabledModules.Count > 0)
                 {
