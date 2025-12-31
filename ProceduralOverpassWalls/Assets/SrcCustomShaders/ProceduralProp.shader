@@ -686,9 +686,5 @@ Shader "Custom/ProceduralObject/Prop/TestShaderInd"
             }
             ENDCG
         }
-
-
-        
     }
-}
 }
