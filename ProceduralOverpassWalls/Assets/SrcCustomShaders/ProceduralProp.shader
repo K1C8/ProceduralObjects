@@ -76,7 +76,7 @@ Shader "Custom/ProceduralObject/Prop/TestShaderInd"
 
             static float4 ApplyUnityShadowBias(float4 clipPos)
             {
-                // Reconstructs the exact pattern you saw in GLSL:
+                // Reconstructs the exact pattern in GLSL:
                 // bias = unity_LightShadowBias.x / clip.w; saturate
                 // zbiased = clip.z + bias
                 // zmax = max(-clip.w, zbiased)
@@ -101,9 +101,6 @@ Shader "Custom/ProceduralObject/Prop/TestShaderInd"
                 MeshProperties mp = _Properties[v.iid];
                 // MeshProperties mp = _Properties[instanceID];
                 float4 tempShadow = mp.castShadow;
-                // Optional: cull entire instance from shadowmap if it shouldn't cast shadows.
-                // Using clip here removes the primitive early (before rasterization in many drivers).
-                // clip(tempShadow.x > 0.5f ? -1 : 1);
 
                 // Instance object->world
                 float4 worldPos = mul(mp.pos, v.vertex);
@@ -120,11 +117,10 @@ Shader "Custom/ProceduralObject/Prop/TestShaderInd"
 
             float4 frag(v2f i) : SV_Target
             {
-                // If you prefer to do the castShadow clip here instead of vert:
                 MeshProperties mp = _Properties[i.iid];
                 clip(mp.castShadow.x - 0.5);
 
-                // Same cutout sense as your compiled shader:
+                // Same cutout sense as the compiled shader:
                 // discard if _ACIMap.r > 0.5  ==> keep only r <= 0.5
                 float a = tex2D(_ACIMap, i.uv).r;
                 clip(0.5 - a);
@@ -164,7 +160,7 @@ Shader "Custom/ProceduralObject/Prop/TestShaderInd"
             struct MeshProperties
             {
                 float4x4 pos;        // instance ObjectToWorld from Matrix4x4.TRS(..., Vector3.one)
-                float4   color;      // unused in this pass (but you can use later)
+                float4   color;      // unused in this pass
                 float4   castShadow; // unused in this pass
             };
             StructuredBuffer<MeshProperties> _Properties;
@@ -191,7 +187,7 @@ Shader "Custom/ProceduralObject/Prop/TestShaderInd"
                 // xyz: object-space position (as in compiled shader), w: upward mask
                 float4 objPos_upMask : TEXCOORD4;
 
-                nointerpolation uint iid : TEXCOORD5; // if you later want per-instance params
+                nointerpolation uint iid : TEXCOORD5; // if later want per-instance params
             };
 
             // Matches the cubic smoothstep the GLSL builds:
@@ -237,14 +233,14 @@ Shader "Custom/ProceduralObject/Prop/TestShaderInd"
                 o.uv = v.uv * _MainTex_ST.xy + _MainTex_ST.zw;
 
                 // Build world-space TBN from instance matrix.
-                // Since your TRS uses scale=1, we can treat (float3x3)mp.pos as pure rotation.
+                // Since TRS uses scale=1, we can treat (float3x3)mp.pos as pure rotation.
                 float3x3 M = (float3x3)mp.pos;
 
                 float3 worldN = normalize(mul(M, v.normal));
                 float3 worldT = normalize(mul(M, v.tangent.xyz));
 
                 // unity_WorldTransformParams.w is handedness flip for negative scaling in Unity;
-                // your instance scale is 1, but keep it for parity.
+                // instance scale is 1, but keep it for parity.
                 float tangentSign = v.tangent.w * unity_WorldTransformParams.w;
                 float3 worldB = normalize(cross(worldN, worldT) * tangentSign);
 
@@ -433,7 +429,7 @@ Shader "Custom/ProceduralObject/Prop/TestShaderInd"
             #pragma vertex vert
             #pragma fragment frag
 
-            // Keep these if you rely on keywords elsewhere
+            // Keep these as decompiled
             #pragma multi_compile __ MULTI_INSTANCE
             #pragma multi_compile __ INFOMODE_OFF
             #pragma multi_compile __ SHADING
@@ -460,7 +456,7 @@ Shader "Custom/ProceduralObject/Prop/TestShaderInd"
             // float4 unity_SHBr, unity_SHBg, unity_SHBb;
             // float4 unity_SHC;
 
-            // ---------- Your instancing buffer ----------
+            // ---------- Instancing buffer ----------
             struct MeshProperties
             {
                 float4x4 pos;        // Object->World from Matrix4x4.TRS(position, rotation, Vector3.one)
@@ -512,7 +508,7 @@ Shader "Custom/ProceduralObject/Prop/TestShaderInd"
 
             static float2 ClampUVToAtlas(float2 uv, float4 atlasRect)
             {
-                // Same logic as your decompiled fragment:
+                // Same logic as the decompiled fragment:
                 float2 du = ddx(uv);
                 float2 dv = ddy(uv);
                 float2 dd = max(abs(du), abs(dv)) * 2.0;
@@ -549,7 +545,7 @@ Shader "Custom/ProceduralObject/Prop/TestShaderInd"
                 o.tbn1 = wB;
                 o.tbn2 = wN;
 
-                // Wet sampling uses OBJECT space vertex pos in your decompile
+                // Wet sampling uses OBJECT space vertex pos in the decompile
                 o.objPos_upMask.xyz = v.vertex.xyz;
                 o.objPos_upMask.w   = ComputeUpwardMask(v.normal.y);
 
@@ -576,7 +572,7 @@ Shader "Custom/ProceduralObject/Prop/TestShaderInd"
 
             float4 frag(v2f i) : SV_Target
             {
-                // Atlas-safe UV clamp first (matches your multi_instance fragment)
+                // Atlas-safe UV clamp first (matches the multi_instance fragment)
                 float2 uv = ClampUVToAtlas(i.uv, _AtlasRect);
 
                 // Cutout (same inverted sense: discard if ACI.r > 0.5)
@@ -678,7 +674,7 @@ Shader "Custom/ProceduralObject/Prop/TestShaderInd"
 
                 // ----- Emissive (ACI.b) -----
                 // Decompile: emissive = (aci.b * vs_COLOR0.w * ObjectColorMap.w) * 10
-                // You removed ObjectColorMap. Use player alpha as intensity scale (or set it = 1).
+                // Removed ObjectColorMap. Use player alpha as intensity scale (or set it = 1).
                 float illumScale = i.tint.a;            // if unused, just set mp.color.a = 1
                 float emiss = aci.b * illumScale * 10.0;
 
