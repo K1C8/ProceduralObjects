@@ -117,7 +117,7 @@ namespace ProceduralObjects
         private readonly ConcurrentDictionary<int, int> equivalentDictUsageTracker
             = new ConcurrentDictionary<int, int>();
         //private ConcurrentDictionary<Mesh, Material> equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
-        private List<int> customList = new List<int>();
+        private List<int> unbatchedPoSeqList = new List<int>();
         //private List<int> overlayList = new List<int>();
         private MaterialPropertyBlock propertyBlock;
         //private Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]> equivalentDictCache;
@@ -253,7 +253,7 @@ namespace ProceduralObjects
             //equivalentDict = new ConcurrentDictionary<int, List<MeshProperties>>();
             //equivalentDictCache = new Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]>();
             //equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
-            customList = new List<int>();
+            unbatchedPoSeqList = new List<int>();
             //overlayList = new List<int>();
             propertyBlock = new MaterialPropertyBlock();
             //propertyBlock.SetColor("_Color", Color.white);
@@ -417,7 +417,7 @@ namespace ProceduralObjects
 
             if (proceduralObjects != null) // && timeFromLastUpdate >= 20.0)
             {
-                customList.Clear();
+                unbatchedPoSeqList.Clear();
                 foreach (KeyValuePair<int, int> kv in equivalentDictUsageTracker)
                 {
                     equivalentDictUsageTracker[kv.Key] = 0;
@@ -466,18 +466,11 @@ namespace ProceduralObjects
                     HelperPool.ReturnIntList(localList);
                 });
 
-
-                //loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testshaderind", out Shader instancedTestShader);
-
-                //Debug.Log("[ProceduralObjects] Max thread count is " + maxThreadCount);
-
                 Parallel.For(0, visibleLeafQuads.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCount }, 
-                    () => new SortingLists(HelperPool.GetIntMeshPropDict(), HelperPool.GetIntList()), //, HelperPool.GetVisibilitySet()),
+                    () => new SortingLists(HelperPool.GetIntMeshPropDict(), HelperPool.GetIntList()),
                     (i, loop, localLists) =>
                 {
                     Quad current = visibleLeafQuads[i];
-                    //List<int> quadPoSeqList = current.allPoIdList;
-                    //ProceduralUtils.TestPoInQuadAndProcess(quadPoSeqList, renderCamera, camPos, sqrDynMinThreshold, isNightTime, localLists.localVisibilitySet);
                     for (int j = 0; j < current.unbatchableList.Count; j ++)
                     {
                         int poSeq = current.unbatchableList[j];
@@ -527,10 +520,8 @@ namespace ProceduralObjects
                             }
                             if (kv.Value.Count > 0)
                             {
-                                //existing.AddRange(kv.Value);
                                 kv.Value.CopyTo(existing, equivalentDictUsageTracker[kv.Key]);
                                 equivalentDictUsageTracker[kv.Key] += kv.Value.Count;
-                                //Debug.Log($"[ProceduralObjects] Processing result, current list {kv.Key} with {kv.Value.Count} instances. List length {equivalentDictUsageTracker[kv.Key]}, capacity at {existing.Length}");
                             }
                         }
                     }
@@ -538,23 +529,19 @@ namespace ProceduralObjects
                     {
                         lock (listLock)
                         {
-                            customList.AddRange(localLists.localUnbatchedList);
+                            unbatchedPoSeqList.AddRange(localLists.localUnbatchedList);
                         }
                     }
 
                     HelperPool.ReturnIntMeshPropDict(localLists.localBatchDict);
                     HelperPool.ReturnIntList(localLists.localUnbatchedList);
-                    //HelperPool.ReturnVisibilitySet(localLists.localVisibilitySet);
                 });
 
                 DateTime sortStartTime = DateTime.Now;
 
-                //MeshProperties currItem;
-
                 foreach (var kv in equivalentDict)
                 {
                     int size = equivalentDictUsageTracker[kv.Key];
-                    //Debug.Log($"[ProceduralObjects] Processing result. Current list head {kv.Key} with {size} instances.");
                     // Processing blank queue/list in equivalentDict.
                     if (size <= 0)
                     {
@@ -597,7 +584,6 @@ namespace ProceduralObjects
 
                 }
 
-                //viewportPoSeqList.Clear();
                 HelperPool.ReturnIntList(viewportPoSeqList);
                 HelperPool.ReturnVisibilitySet(visibilitySet);
                 leafQuads.Clear();
@@ -722,20 +708,17 @@ namespace ProceduralObjects
                         propertyBlock.SetBuffer("_Properties", meshPropertiesBuffer);
                         try
                         {
-                            //Debug.Log(string.Format("[ProceduralObjects] Peeking first item in equivalentScratchpad list {0} iteration {1}, item with m4x4s {2}.", pair.Key.name, i, subMatrix4x4s[0].ToString()));
                             Graphics.DrawMeshInstancedIndirect(mesh, 0, material, new Bounds(Vector3.zero, new Vector3(10000.0f, 10000.0f, 10000.0f)), argsBuffer, 0, propertyBlock, ShadowCastingMode.On, true, 0, renderCamera);
                             totalBatchCount++;
-                            totalBatchedPoCount += pair.Value.Length;
+                            totalBatchedPoCount += currentBatchSize;
                         }
                         catch (Exception e)
                         {
                             Debug.LogError("[ProceduralObjects] Error while rendering mesh instanced indirect " + mesh.name + ": " + e.Message + " - Stack Trace : " + e.StackTrace);
                         }
-
-                        //Debug.Log(string.Format("[ProceduralObjects] Mesh {0} count observed is {1}.", pair.Key.name, pair.Value.Length));
                     }
 
-                    foreach (var index in customList)
+                    foreach (var index in unbatchedPoSeqList)
                     {
                         Graphics.DrawMesh(proceduralObjects[index].m_mesh, proceduralObjects[index].m_position, proceduralObjects[index].m_rotation,
                             proceduralObjects[index].m_material, 0, null, 0, null, !proceduralObjects[index].disableCastShadows, true);
@@ -745,10 +728,6 @@ namespace ProceduralObjects
                     // If the user is hovering on the root of a group, overlay the group with red.
                     if (SingleHoveredObj != null)
                     {
-                        //if (SingleHoveredObj == obj || (selectedGroup == null && (obj.group != null && obj.group.root == SingleHoveredObj)))
-                        //    Graphics.DrawMesh(obj.overlayRenderMesh, obj.m_position, obj.m_rotation,
-                        //        selectedGroup == null ? (SingleHoveredObj.isRootOfGroup ? redOverlayMat : purpleOverlayMat) : purpleOverlayMat,
-                        //        0, null, 0, null, false, false);
                         if (selectedGroup == null && SingleHoveredObj.isRootOfGroup)
                         {
                             // Process the group that its root is being hovered on, overlay with red.
@@ -775,8 +754,8 @@ namespace ProceduralObjects
                 var poDrawMeshTime = Math.Round((DateTime.Now - startTime).TotalMilliseconds, 2) - poCalcTime;
                 poDrawMeshTimeSum += poDrawMeshTime;
 
-                Debug.Log(string.Format("[ProceduralObjects] Batching process consumed {0} ms, sorting equivalentDictCache consumed {1} ms to complete. {2} POs rendered batched, {3} POs rendered individually this frame.",
-                    totalBatchingTime, cacheSortTime, totalBatchedPoCount, customList.Count));
+                Debug.Log(string.Format("[ProceduralObjects] Batching process consumed {0} ms, sorting equivalentDictCache consumed {1} ms to complete. {2} POs rendered batched in {3} batches, {4} POs rendered individually this frame.",
+                    totalBatchingTime, cacheSortTime, totalBatchedPoCount, totalBatchCount, unbatchedPoSeqList.Count));
 
                 if (moduleManager.enabledModules.Count > 0)
                 {

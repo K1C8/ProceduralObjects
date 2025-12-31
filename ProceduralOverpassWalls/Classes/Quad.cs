@@ -83,7 +83,7 @@ namespace ProceduralObjects.Classes
 
                             batchOriginalArrayDict[obj._baseProp.name].Add(
                                 new MeshProperties(Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one),
-                                obj.disableCastShadows ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0),
+                                !obj.disableCastShadows ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0),
                                 obj.m_color)
                                 );
 
@@ -126,7 +126,7 @@ namespace ProceduralObjects.Classes
                             batchCustomArrayDict[objHashStr] = new List<MeshProperties> 
                             { 
                                 new MeshProperties(Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one),
-                                obj.disableCastShadows ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0),
+                                !obj.disableCastShadows ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0),
                                 obj.m_color)
                             };
                         }
@@ -144,7 +144,7 @@ namespace ProceduralObjects.Classes
                             {
                                 batchCustomArrayDict[objHashStr].Add(
                                     new MeshProperties(Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one),
-                                    obj.disableCastShadows ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0),
+                                    !obj.disableCastShadows ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0),
                                     obj.m_color)
                                     );
                                 batchCustomPoIdDict[objHashStr].Add(poSeq);
