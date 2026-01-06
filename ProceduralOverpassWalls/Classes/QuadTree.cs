@@ -16,7 +16,7 @@ namespace ProceduralObjects.Classes
                 poIndices.Add(i);
             }
             maxLevel = _max;
-            Bounds rootBounds = new Bounds(new Vector3(0f, 512f, 0f), new Vector3(32000f, 1024f, 32000f));
+            Bounds rootBounds = new Bounds(new Vector3(0f, 512f, 0f), new Vector3(32000f, 10240f, 32000f));
             root = new Quad(0, _max, null, rootBounds, poIndices);
         }
 

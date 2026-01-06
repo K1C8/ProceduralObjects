@@ -504,7 +504,7 @@ namespace ProceduralObjects
                             else if (existing.Length - equivalentDictUsageTracker[kv.Key] < kv.Value.Count)
                             {
                                 Debug.Log($"[ProceduralObjects] Processing result, current list {kv.Key} needs to be expanded to new capacity.");
-                                int newSize = existing.Length << 1;
+                                int newSize = Math.Max(existing.Length << 1, kv.Value.Count + equivalentDictUsageTracker[kv.Key]);
                                 if (newSize == 0)
                                 {
                                     newSize = 2;
@@ -708,7 +708,7 @@ namespace ProceduralObjects
                         propertyBlock.SetBuffer("_Properties", meshPropertiesBuffer);
                         try
                         {
-                            Graphics.DrawMeshInstancedIndirect(mesh, 0, material, new Bounds(Vector3.zero, new Vector3(10000.0f, 10000.0f, 10000.0f)), argsBuffer, 0, propertyBlock, ShadowCastingMode.On, true, 0, renderCamera);
+                            Graphics.DrawMeshInstancedIndirect(mesh, 0, material, new Bounds(Vector3.zero, new Vector3(32000f, 10240f, 32000f)), argsBuffer, 0, propertyBlock, ShadowCastingMode.On, true, 0, renderCamera);
                             totalBatchCount++;
                             totalBatchedPoCount += currentBatchSize;
                         }

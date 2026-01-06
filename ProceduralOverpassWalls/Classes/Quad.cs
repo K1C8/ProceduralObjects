@@ -31,6 +31,8 @@ namespace ProceduralObjects.Classes
         private int _repeateModifiedMeshCount = 0;
         private int _unmodifiedMeshCount = 0;
         private int _minimumBatchSize = 3;
+        private Vector3[] corners;
+        private Vector3[] line;
 
         // Debug line boxes
         GameObject lineObject;
@@ -88,7 +90,7 @@ namespace ProceduralObjects.Classes
                                 );
 
                             batchOriginalPoIdDict[obj._baseProp.name].Add(poSeq);
-                            _unmodifiedMeshCount++;
+                            //_unmodifiedMeshCount++;
                             continue;
                         }
                         //Vector3[] vertices = obj.m_mesh.vertices;
@@ -185,6 +187,7 @@ namespace ProceduralObjects.Classes
                 {
                     if (kv.Value.Count >= _minimumBatchSize)
                     {
+                        _unmodifiedMeshCount += kv.Value.Count;
                         Debug.Log($"[ProceduralObjects] Quad {bounds.center} loaded batchable unmodified meshStatus 1 meshes, meshId: {kv.Key}, count: {kv.Value.Count}");
                     }
                     else
@@ -214,6 +217,8 @@ namespace ProceduralObjects.Classes
                 }
 
             }
+
+            CreateBoundsAndLines();
             
         }
 
@@ -275,42 +280,14 @@ namespace ProceduralObjects.Classes
         {
             if (children == null)
             {
-                if (lineRenderer == null)
+                if (lineObject == null)
                 {
-                    if (outlineMat == null)
-                    {
-                        outlineMat = new Material(Shader.Find("GUI/Text Shader"))
-                        {
-                            color = new Color(1, 1, 1, .3f)
-                        };
-                    }
-                    lineObject = new GameObject("POQuadCubicOutline");
-                    lineRenderer = lineObject.AddComponent<LineRenderer>();
-                    lineRenderer.material = outlineMat;
-                    lineRenderer.startWidth = 4f;
-                    lineRenderer.endWidth = 4f;
+                    CreateBoundsAndLines();
                 }
-                if (lineRenderer == null)
+                if (lineObject != null && !lineObject.activeSelf)
                 {
-                    Debug.Log($"[ProceduralObjects] LineRenderer of Quad {bounds.center} is null!");
-                    return;
+                    lineObject.SetActive(true);
                 }
-                Vector3[] corners = new Vector3[8];
-                Vector3 min = bounds.min;
-                Vector3 max = bounds.max;
-                corners[0] = new Vector3(min.x, min.y, min.z); // bottom-front-left
-                corners[1] = new Vector3(max.x, min.y, min.z); // bottom-front-right
-                corners[2] = new Vector3(min.x, min.y, max.z); // bottom-back-left
-                corners[3] = new Vector3(max.x, min.y, max.z); // bottom-back-right
-                corners[4] = new Vector3(min.x, max.y, min.z); // top-front-left
-                corners[5] = new Vector3(max.x, max.y, min.z); // top-front-right
-                corners[6] = new Vector3(min.x, max.y, max.z); // top-back-left
-                corners[7] = new Vector3(max.x, max.y, max.z); // top-back-right
-                Vector3[] line = new Vector3[16] { corners[0], corners[1], corners[3], corners[2], corners[0], corners[4],
-                    corners[6], corners[7], corners[5], corners[1], corners[3], corners[7], corners[5], corners[4], 
-                    corners[6], corners[2]};
-                lineRenderer.positionCount = 16;
-                lineRenderer.SetPositions(line);
             }
             else
             {
@@ -348,6 +325,50 @@ namespace ProceduralObjects.Classes
                 sb.Append("NO_TEXTPARAMETERS");
 
             return sb.ToString();
+        }
+
+        public void CreateBoundsAndLines()
+        {
+            if (children == null)
+            {
+                if (lineObject == null)
+                {
+                    if (outlineMat == null)
+                    {
+                        outlineMat = new Material(Shader.Find("GUI/Text Shader"))
+                        {
+                            color = new Color(1, 1, 1, .3f)
+                        };
+                    }
+                    lineObject = new GameObject("POQuadCubicOutline");
+                    lineRenderer = lineObject.AddComponent<LineRenderer>();
+                    lineRenderer.material = outlineMat;
+                    lineRenderer.startWidth = 4f;
+                    lineRenderer.endWidth = 4f;
+                }
+                if (lineObject == null)
+                {
+                    Debug.Log($"[ProceduralObjects] Failed to initialize lineObject. lineObject of Quad {bounds.center} is null!");
+                    return;
+                }
+                corners = new Vector3[8];
+                Vector3 min = bounds.min;
+                Vector3 max = bounds.max;
+                corners[0] = new Vector3(min.x, min.y, min.z); // bottom-front-left
+                corners[1] = new Vector3(max.x, min.y, min.z); // bottom-front-right
+                corners[2] = new Vector3(min.x, min.y, max.z); // bottom-back-left
+                corners[3] = new Vector3(max.x, min.y, max.z); // bottom-back-right
+                corners[4] = new Vector3(min.x, max.y, min.z); // top-front-left
+                corners[5] = new Vector3(max.x, max.y, min.z); // top-front-right
+                corners[6] = new Vector3(min.x, max.y, max.z); // top-back-left
+                corners[7] = new Vector3(max.x, max.y, max.z); // top-back-right
+                line = new Vector3[16]{corners[0], corners[1], corners[3], corners[2], corners[0], corners[4],
+                    corners[6], corners[7], corners[5], corners[1], corners[3], corners[7], corners[5], corners[4],
+                    corners[6], corners[2]};
+                lineRenderer.positionCount = 16;
+                lineRenderer.SetPositions(line);
+                lineObject.SetActive(false);
+            }
         }
     }
 }

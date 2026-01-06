@@ -10,6 +10,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml;
+using System.Xml.Linq;
 using UnityEngine;
 using static ProceduralObjects.ProceduralObjectsLogic;
 
@@ -246,13 +247,39 @@ namespace ProceduralObjects.Classes
 
             Debug.Log(string.Format("[ProceduralObjects] LoadContainerData, PropInfo props' size is {0}, BuildingInfo buildings' size is {1}", props.Length, buildings.Length));
 
+            int propDefaultShaderCount = 0;
+            int propAnimUVShaderCount = 0;
+            int propDecalBlendShaderCount = 0;
+            int propRotorShaderCount = 0;
+
             foreach (var c in containerArray)
             {
                 try
                 {
                     var obj = new ProceduralObject(c, logic.layerManager, props, buildings);
                     string baseName = obj._baseProp == null ? obj._baseBuilding.name : obj._baseProp.name;
-                    Debug.Log($"[ProceduralObjects] Loading data for proceduralObjects number {logic.proceduralObjects.Count}, from container.id: {c.id}. Container object name is {baseName}, container meshStatus {c.meshStatus}.");
+                    string shaderName = obj.m_material.shader == null ? "NO_SHADER_FOUND" : obj.m_material.shader.name;
+                    Debug.Log($"[ProceduralObjects] Loading data for proceduralObjects number {logic.proceduralObjects.Count}, from container.id: {c.id}. Container object name is: {baseName}, meshStatus: {c.meshStatus}; object material shader: {shaderName}");
+                    if (c.objectType == "PROP")
+                    {
+                        if (shaderName.Equals("Custom/Props/Prop/Default"))
+                        {
+                            propDefaultShaderCount++;
+                        }
+                        else if (shaderName.Equals("Custom/Props/Prop/AnimUV"))
+                        {
+                            propAnimUVShaderCount++;
+                        }
+                        else if (shaderName.Equals("Custom/Props/Decal/Blend"))
+                        {
+                            propDecalBlendShaderCount++;
+                        }
+                        else if (shaderName.Equals("Custom/Vehicles/Vehicle/Rotors"))
+                        {
+                            propRotorShaderCount++;
+                        }
+                    }
+
                     if (obj.meshStatus != 1)
                     {
                         if (obj.RequiresUVRecalculation && !obj.disableRecalculation)
@@ -358,7 +385,7 @@ namespace ProceduralObjects.Classes
 
             */
             // Test end
-
+            Debug.Log($"[ProceduralObjects] Data loaded from containers. Prop POs shader statistics: default shader object count at {propDefaultShaderCount}, AnimUV shader object count as {propAnimUVShaderCount}, decal shader object count at {propDecalBlendShaderCount}, rotor shader object count at {propRotorShaderCount}.");
             PopupStart.LoadingDoneShowPopup();
         }
         public static List<POGroup> BuildGroupsFromData(this ProceduralObjectsLogic logic)
