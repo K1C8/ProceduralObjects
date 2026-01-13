@@ -41,8 +41,35 @@ namespace ProceduralObjects.Classes
 
             // Check cache first
             var logic = ProceduralObjectsLogic.instance;
-            var cached = logic.GetCachedObjectById(id);
-            if (cached != null)
+            //var cached = logic.GetCachedObjectById(id);
+            //if (cached != null)
+            //    return cached;
+
+            //// Fallback to slow search
+            //for (int i = 0; i < list.Count; i++)
+            //{
+            //    if (list[i].id == id)
+            //    {
+            //        // logic._groupRootCache[id] = list[i]; // store for future lookups
+            //        logic.AddObjectToCacheByListIndex(i);
+            //        return list[i];
+            //    }
+            //}
+            int cached = GetSeqNoWithId(list, id);
+            if (cached > -1)
+            {
+                ProceduralObject objectToReturn = logic.proceduralObjects[GetSeqNoWithId(list, id)];
+                return objectToReturn;
+            }
+            return null;
+        }
+
+        public static int GetSeqNoWithId(this List<ProceduralObject> list, int id)
+        {
+            // Check cache first
+            var logic = ProceduralObjectsLogic.instance;
+            var cached = logic.GetCachedSeqNoById(id);
+            if (cached > -1)
                 return cached;
 
             // Fallback to slow search
@@ -52,11 +79,11 @@ namespace ProceduralObjects.Classes
                 {
                     // logic._groupRootCache[id] = list[i]; // store for future lookups
                     logic.AddObjectToCacheByListIndex(i);
-                    return list[i];
+                    return i;
                 }
             }
 
-            return null;
+            return -1;
         }
 
         public static Vector2 WorldToGuiPoint(this Vector3 position)
@@ -581,6 +608,7 @@ namespace ProceduralObjects.Classes
                         sub.ConstructObject(subB.m_buildingInfo, id);
                         float a = -(subB.m_angle * Mathf.Rad2Deg) % 360f;
                         if (a < 0) a += 360f;
+                        // May have to check the need of using subB.SetPosition and subB.SetRotation
                         sub.m_rotation = Quaternion.Euler(sub.m_rotation.eulerAngles.x, a, sub.m_rotation.eulerAngles.z) * obj.m_rotation;
                         sub.m_position = VertexUtils.RotatePointAroundPivot(subB.m_position + obj.m_position, obj.m_position, obj.m_rotation);
                         pos.Add(sub);
@@ -978,5 +1006,14 @@ namespace ProceduralObjects.Classes
             return bundleLoader;
         }
 
+
+        public static void RemoveAtSwapBack<T> (this List<T> list, int index)
+        {
+            if (index < list.Count - 1)
+            {
+                list[index] = list[list.Count - 1];
+            }
+            list.RemoveAt(list.Count - 1);
+        }
     }
 }

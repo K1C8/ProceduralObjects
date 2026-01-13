@@ -74,7 +74,7 @@ namespace ProceduralObjects.SelectionMode
                             o.SetPosition( new Vector3(o.m_position.x, localheightdiff + maxObjects.Key.m_position.y, o.m_position.z));
                             o.SetRotation( rotDiff * o.m_rotation);
                             if (o != po)
-                                o.m_position = VertexUtils.RotatePointAroundPivot(o.m_position, po.m_position, rotDiff);
+                                o.m_position = VertexUtils.RotatePointAroundPivot(o.m_position, po.m_position, rotDiff); // May have to check the need of using o.SetPosition
                         }
                         else
                         {
