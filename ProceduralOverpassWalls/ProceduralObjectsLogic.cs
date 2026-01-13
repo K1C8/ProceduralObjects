@@ -136,7 +136,7 @@ namespace ProceduralObjects
         //private ComputeBuffer meshPropertiesBuffer;
         //private uint[] args;
 
-        private static Dictionary<int, ProceduralObject> _groupRootCache = new Dictionary<int, ProceduralObject>();
+        private static Dictionary<int, int> _groupRootCache = new Dictionary<int, int>();
 
         void Start()
         {
@@ -372,6 +372,7 @@ namespace ProceduralObjects
                             if (req.propInfo.m_mesh.name == "ploppableasphalt-prop" || req.propInfo.m_mesh.name == "ploppableasphalt-decal")
                                 c = ProceduralUtils.GetPloppableAsphaltCfg();
                         }
+                        // Consider adding an event for object creation during gameplay
                         po.m_position = req.position;
                         po.m_rotation = req.rotation;
                         po.m_color = c;
@@ -436,7 +437,7 @@ namespace ProceduralObjects
                     {
                         //sb.Append($"Quad {quad.bounds.center}, ");
                         visibleLeafQuads.Add(quad);
-                        viewportPoSeqList.AddRange(quad.allPoIdList);
+                        viewportPoSeqList.AddRange(quad.allPoSeqList);
                     }
                 }
                 //Debug.Log(sb.ToString());
@@ -769,6 +770,7 @@ namespace ProceduralObjects
                         if (!layerVisible)
                             layerVisible = !m.parentObject.layer.m_isHidden;
                         try { m.UpdateModule(this, simPaused, layerVisible); }
+                        // Add a simple compare here for the position/rotation before and after UpdateModule(). Add to dirty sets if anything changed.
                         catch (Exception e) { Debug.LogError("[ProceduralObjects] Error inside module UpdateModule() method!\n" + e); }
                     }
                 }
@@ -1036,6 +1038,9 @@ namespace ProceduralObjects
                             currentlyEditingObject.tempObj.transform.rotation = currentlyEditingObject.m_rotation;
                             foreach (var kvp in moveToSelection)
                             {
+                                // Need changes here. Should use the SetPosition() and SetRotation()
+                                // kvp.Key.SetPosition(kvp.Value.position);
+                                // kvp.Key.SetRotation(kvp.Value.rotation);
                                 kvp.Key.m_position = kvp.Value.position;
                                 kvp.Key.m_rotation = kvp.Value.rotation;
                             }
@@ -1057,6 +1062,7 @@ namespace ProceduralObjects
                                 {
                                     currentlyEditingObject.historyEditionBuffer.axisUsed = axisState;
                                     var obj = CloneObject(currentlyEditingObject);
+                                    // Consider adding an event for object creation and insert it to the Quad during gameplay
                                     obj.m_position = currentlyEditingObject.historyEditionBuffer.prevTempPos;
                                     if (selectedGroup != null)
                                         selectedGroup.AddToGroup(obj);
@@ -1076,6 +1082,7 @@ namespace ProceduralObjects
                                             {
                                                 var lineobj = CloneObject(currentlyEditingObject);
                                                 lineobj.m_position = drawpos;
+                                                // Consider adding an event for updating Quad after object cloning
                                                 drawpos += Gizmos.posDiffSaved;
                                                 if (selectedGroup != null)
                                                     selectedGroup.AddToGroup(lineobj);
@@ -1324,12 +1331,14 @@ namespace ProceduralObjects
                                                     {
                                                         try
                                                         {
+                                                            // One frame drawing only.
                                                             Graphics.DrawMesh(currentlyEditingObject.m_mesh, drawpos,
                                                                 currentlyEditingObject.m_rotation, currentlyEditingObject.m_material, 0, renderCamera, 0, null, !currentlyEditingObject.disableCastShadows, true);
                                                         }
                                                         catch { }
                                                         drawpos += Gizmos.posDiffSaved;
                                                     }
+                                                    // Should change to currentlyEditingObject.SetPosition(drawpos)
                                                     currentlyEditingObject.m_position = drawpos;
                                                 }
                                                 Gizmos.DetectRotationKeyboard();
@@ -2351,6 +2360,8 @@ namespace ProceduralObjects
             }
             previousToolType = ToolsModifierControl.toolController.CurrentTool.GetType();
 
+            ChangeTracker.Tracker.Process();
+
             // Performance metrics
             poUpdateTimeSum += Math.Round((DateTime.Now - updateStart).TotalMilliseconds, 2);
 
@@ -2567,8 +2578,10 @@ namespace ProceduralObjects
                                                 var inclusiveSelection = (selectedGroup == null) ? POGroup.AllObjectsInSelection(pObjSelection, selectedGroup) : pObjSelection;
                                                 foreach (var po in inclusiveSelection)
                                                 {
+                                                    // Consider extracting these direct modifications to the PO fields into the ProceduralObject class of ProceduralClass.cs
                                                     po.m_color = color;
                                                     po.m_material.color = color;
+                                                    ChangeTracker.MarkMeshPropertiesDirty(proceduralObjects.GetSeqNoWithId(po.id));
                                                 }
                                             },
                                             () => { showLayerSetScroll = false; scrollLayerSet = Vector2.zero; showMoreTools = false; });
@@ -3586,6 +3599,7 @@ namespace ProceduralObjects
                                         if (external.m_externalType == ClipboardProceduralObjects.ClipboardType.Single)
                                         {
                                             var obj = PlaceCacheObject(external.m_object, false);
+                                            // Consider adding an event for object creation and insert it to the Quad during gameplay
                                             obj.m_position = external.m_object._staticPos;
                                             pObjSelection.Add(obj);
                                         }
@@ -3695,7 +3709,10 @@ namespace ProceduralObjects
         {
             external.CreateClipboard();
             if (external.m_externalType == ClipboardProceduralObjects.ClipboardType.Single)
+            {
                 PlaceCacheObject(external.m_object, true);
+                // Consider adding an event for object creation and insert it to the Quad during gameplay
+            }
             else
             {
                 selectedGroup = null;
@@ -3710,6 +3727,7 @@ namespace ProceduralObjects
             obj.id = proceduralObjects.GetNextUnusedId();
             CloneIntoObject(source, obj);
             proceduralObjects.Add(obj);
+            // Consider adding an event for object creation during gameplay
             return obj;
         }
         public void CloneIntoObject(ProceduralObject source, ProceduralObject destination)
@@ -4169,6 +4187,7 @@ namespace ProceduralObjects
                             obj.tempObj.transform.rotation = obj.m_rotation;
                             obj.tempObj.transform.SetParent(currentlyEditingObject.tempObj.transform, true);
                         }
+                        // Consider adding an event for object creation and insert it to the Quad during gameplay
                         moveToSelection.Add(obj, obj.tempObj.transform);
                         if (selectedGroup != null)
                             selectedGroup.AddToGroup(obj);
@@ -4587,17 +4606,24 @@ namespace ProceduralObjects
         //    public bool ShaderIsInstanced => (flags & 4) != 0;
         //}
 
-        public ProceduralObject GetCachedObjectById(int id)
+        //public ProceduralObject GetCachedObjectById(int id)
+        //{
+        //    if (_groupRootCache.TryGetValue(id, out var cached))
+        //        return proceduralObjects[cached];
+        //    return null;
+        //}
+
+        public int GetCachedSeqNoById(int id)
         {
             if (_groupRootCache.TryGetValue(id, out var cached))
                 return cached;
-            return null;
+            return -1;
         }
 
         public void AddObjectToCacheByListIndex(int index)
         {
             var id = proceduralObjects[index].id;
-            _groupRootCache[id] = proceduralObjects[index];
+            _groupRootCache[id] = index;
         }
 
         public void InvalidCacheById(int id)
@@ -4635,12 +4661,12 @@ namespace ProceduralObjects
                 this.color = Color;
             }
 
-            //public MeshProperties(MeshProperties origin)
-            //{
-            //    this.position = origin.position;
-            //    this.castShadow = origin.castShadow;
-            //    this.color = origin.color;
-            //}
+            public MeshProperties(ProceduralObject obj)
+            {
+                this.position = Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one);
+                this.castShadow = !obj.disableCastShadows ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0);
+                this.color = obj.m_color;
+            }
 
             public static int Size()
             {

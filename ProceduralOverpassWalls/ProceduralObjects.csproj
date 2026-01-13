@@ -68,12 +68,14 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Classes\AdvancedEdition.cs" />
+    <Compile Include="Classes\ChangeTracker.cs" />
     <Compile Include="Classes\ClipboardProceduralObjects.cs" />
     <Compile Include="Classes\ExternalProceduralObjectsManager.cs" />
     <Compile Include="Classes\HelperPool.cs" />
     <Compile Include="Classes\MaterialOptions.cs" />
     <Compile Include="Classes\MeasurementsManager.cs" />
     <Compile Include="Classes\POGroup.cs" />
+    <Compile Include="Classes\PropInfoHelper.cs" />
     <Compile Include="Classes\Quad.cs" />
     <Compile Include="Classes\QuadTree.cs" />
     <Compile Include="Classes\RenderOptions.cs" />
@@ -242,7 +244,7 @@
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
-    <PostBuildEvent>xcopy /y  "$(TargetDir)ProceduralObjects.dll" "E:\Program Files (x86)\Steam\steamapps\workshop\content\255710\1094334744"
+    <PostBuildEvent>xcopy /y  "$(TargetDir)ProceduralObjects.dll" "C:\Users\ccy01\AppData\Local\Colossal Order\Cities_Skylines\Addons\Mods\1094334744"
 xcopy /y  "$(TargetDir)ProceduralObjects.dll" "G:\Exchange\mod-debug-build\1094334744"</PostBuildEvent>
   </PropertyGroup>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

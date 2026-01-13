@@ -24,7 +24,8 @@ namespace ProceduralObjects.Classes
         {
             if (container.objectType == "PROP")
             {
-                PropInfo sourceProp = props.FirstOrDefault(info => info.name.Equals(container.basePrefabName));
+                //PropInfo sourceProp = props.FirstOrDefault(info => info.name.Equals(container.basePrefabName));
+                PropInfo sourceProp = PropInfoHelper.GetPropInfo(container.basePrefabName);
                 this._baseProp = sourceProp;
                 this.id = container.id;
                 this.basePrefabName = container.basePrefabName;
@@ -363,9 +364,12 @@ namespace ProceduralObjects.Classes
             this.baseInfoType = "PROP";
             // this.flipFaces = false;
             this.tilingFactor = 8;
+
+            // Consider adding an event for object creation during gameplay
             m_position = ToolsModifierControl.cameraController.m_currentPosition;
             m_rotation = Quaternion.identity;
-           // Mesh mesh = sourceProp.m_mesh.InstantiateMesh();
+
+            // Mesh mesh = sourceProp.m_mesh.InstantiateMesh();
             // meshStatus = 1;
             m_material = GameObject.Instantiate(sourceProp.m_material);
             if (sourceProp.m_isDecal && ProceduralObjectsMod.AutoResizeDecals.value && !skipDecalShrink)
@@ -413,9 +417,11 @@ namespace ProceduralObjects.Classes
             this.basePrefabName = sourceBuilding.name;
             this.isPloppableAsphalt = false;
             this.baseInfoType = "BUILDING";
-           // this.flipFaces = false;
+            // this.flipFaces = false;
             // this.recalculateNormals = true;
             // this.tilingFactor = 8;
+
+            // Consider adding an event for object creation during gameplay
             m_position = ToolsModifierControl.cameraController.m_currentPosition;
             m_rotation = Quaternion.identity;
             // m_mesh = sourceBuilding.m_mesh.InstantiateMesh();
@@ -457,7 +463,11 @@ namespace ProceduralObjects.Classes
             }
         SetPos:
             m_position = pos;
+
+            // Add to DirtyMeshProperties set.
+            ChangeTracker.MarkMeshPropertiesDirty(ProceduralObjectsLogic.instance.proceduralObjects.GetSeqNoWithId(id));
         }
+
         public void SetRotation(Quaternion rot)
         {
             if (m_modules == null) goto SetRot;
@@ -469,6 +479,9 @@ namespace ProceduralObjects.Classes
             }
         SetRot:
             m_rotation = rot;
+
+            // Add to DirtyMeshProperties set.
+            ChangeTracker.MarkMeshPropertiesDirty(ProceduralObjectsLogic.instance.proceduralObjects.GetSeqNoWithId(id));
         }
 
         public void ApplyModelChange()
@@ -500,6 +513,9 @@ namespace ProceduralObjects.Classes
 
             // render distance calculation
             renderDistance = RenderOptions.instance.CalculateRenderDistance(this, false);
+
+            // Add to DirtyMesh set.
+            ChangeTracker.MarkMeshDirty(ProceduralObjectsLogic.instance.proceduralObjects.GetSeqNoWithId(id));
         }
 
         public void ChangeNormalsRecalc()
@@ -588,6 +604,7 @@ namespace ProceduralObjects.Classes
         public BuildingInfo _baseBuilding;
 
         public GameObject tempObj;
+        public Quad ownerQuad;
 
         public HistoryBuffer historyEditionBuffer;
 

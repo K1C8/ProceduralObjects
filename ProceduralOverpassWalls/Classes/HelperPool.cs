@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using UnityEngine;
@@ -14,10 +15,12 @@ namespace ProceduralObjects.Classes
         static readonly Stack<List<int>> intListPool = new Stack<List<int>>(32);
         static readonly Stack<HashSet<int>> visibilitySetPool = new Stack<HashSet<int>>(32);
         static readonly ThreadLocal<Stack<List<MeshProperties>>> localMeshPropsPool = new ThreadLocal<Stack<List<MeshProperties>>>(() => new Stack<List<MeshProperties>>(8));
+        static readonly Stack<SHA1> sha1Pool = new Stack<SHA1>(1);
 
         private static readonly object setLock = new object();
         private static readonly object dictLock = new object();
         private static readonly object customListLock = new object();
+        private static readonly object sha1Lock = new object();
 
         public static Dictionary<int, List<MeshProperties>> GetIntMeshPropDict()
         {
@@ -89,6 +92,31 @@ namespace ProceduralObjects.Classes
             {
                 visibilitySetPool.Push(set);
             }
+        }
+
+        public static SHA1 GetSHA1Instance()
+        {
+            lock (sha1Lock)
+            {
+                return sha1Pool.Count > 0 ? sha1Pool.Pop() : SHA1.Create();
+            }
+        }
+
+        public static void ReturnSHA1Instance(SHA1 sha1)
+        {
+            lock (sha1Lock)
+            {
+                sha1Pool.Push(sha1);
+            }
+        }
+
+        public static void DestroySHA1Pool()
+        {
+            foreach (SHA1 sha1 in sha1Pool)
+            {
+                sha1.Clear();
+            }
+            sha1Pool.Clear();
         }
     }
 }
