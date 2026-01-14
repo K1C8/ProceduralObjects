@@ -60,8 +60,10 @@ namespace ProceduralObjects.SelectionMode
                                     mustSetAsRoot = true;
                                 logic.selectedGroup.Remove(logic, selection[i]);
                             }
-                            logic.proceduralObjects.Remove(selection[i]);
-                            logic.InvalidCacheById(selection[i].id); // Caching Test
+                            int seqNo = logic.proceduralObjects.GetSeqNoWithId(selection[i].id);
+                            logic.InvalidSeqCacheById(selection[i].id); // Caching Test
+                            //logic.proceduralObjects[seqNo] = null;
+                            //logic.proceduralObjects.Remove(selection[i]);
                             if (logic.clipboard.type == ClipboardProceduralObjects.ClipboardType.Single)
                             {
                                 var obj = new ProceduralObject(logic.clipboard.single_object, selection[i].id, selection[i].m_position, logic.layerManager);

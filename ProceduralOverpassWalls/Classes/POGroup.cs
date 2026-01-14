@@ -113,8 +113,11 @@ namespace ProceduralObjects.Classes
             {
                 logic.moduleManager.DeleteAllModules(obj);
                 logic.activeIds.Remove(obj.id);
-                logic.proceduralObjects.Remove(obj);
-                logic.InvalidCacheById(obj.id); // Caching Test
+
+                int seqNo = logic.proceduralObjects.GetSeqNoWithId(obj.id);
+                logic.InvalidSeqCacheById(obj.id); // Caching Test
+                //logic.proceduralObjects[seqNo] = null;
+                //logic.proceduralObjects.Remove(obj);
             }
             logic.groups.Remove(group);
         }

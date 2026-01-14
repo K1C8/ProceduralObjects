@@ -24,9 +24,9 @@ namespace ProceduralObjects.Classes
         private Dictionary<int, BatchHandle> poSeqBatchHandleDict;
         // -------- All POs must be inside all collections above.    --------
         // -------- All POs must be inside exactly ONE option below. --------
-        // -- Option A: Original Batchable
-        public Dictionary<string, List<int>> batchOriginalPoIdDict;
-        public Dictionary<string, List<MeshProperties>> batchOriginalArrayDict;
+        // -- Option A: Original Batchable. Disabled temporarily from '26/01/13
+        //public Dictionary<string, List<int>> batchOriginalPoIdDict;
+        //public Dictionary<string, List<MeshProperties>> batchOriginalArrayDict;
         // -- Option B: Custom Batchable
         public Dictionary<string, List<int>> batchCustomPoIdDict;
         public Dictionary<string, List<MeshProperties>> batchCustomArrayDict;
@@ -37,8 +37,8 @@ namespace ProceduralObjects.Classes
         private readonly int _maxLevel;
 
         private int _maxPoCount = 4096;
-        private int _repeateModifiedMeshCount = 0;
-        private int _unmodifiedMeshCount = 0;
+        private int _batchedPropMeshCount = 0;
+        //private int _unmodifiedMeshCount = 0;
         private int _minimumBatchSize = 3;
         private Vector3[] corners;
         private Vector3[] line;
@@ -55,9 +55,9 @@ namespace ProceduralObjects.Classes
             _level = level;
             _maxLevel = maxLevel;
             batchCustomArrayDict = new Dictionary<string, List<MeshProperties>>();
-            batchOriginalArrayDict = new Dictionary<string, List<MeshProperties>>();
+            //batchOriginalArrayDict = new Dictionary<string, List<MeshProperties>>();
             batchCustomPoIdDict = new Dictionary<string, List<int>>();
-            batchOriginalPoIdDict = new Dictionary<string, List<int>>();
+            //batchOriginalPoIdDict = new Dictionary<string, List<int>>();
             poSeqBatchHandleDict = new Dictionary<int, BatchHandle>();
             unbatchableList = new List<int>();
             allPoSeqList = new List<int>();
@@ -81,39 +81,26 @@ namespace ProceduralObjects.Classes
                 List<ProceduralObject> proceduralObjects = ProceduralObjectsLogic.instance.proceduralObjects;
                 using (SHA1 sha1 = SHA1.Create())
                 {
-                    foreach (int poSeq in allPoSeqList)
+                    foreach (int seqNo in allPoSeqList)
                     {
-                        var obj = proceduralObjects[poSeq];
+                        var obj = proceduralObjects[seqNo];
                         obj.ownerQuad = this;
-                        if (obj.baseInfoType == "BUILDING" || obj.customTexture != null || !obj.m_material.shader.name.Equals(defaultPropShaderStr))
+                        string objHashStr;
+                        if (!IsPoAbleToBeBatched(obj))
                         {
-                            poSeqBatchHandleDict.Add(poSeq, new BatchHandle(null, unbatchableList.Count, ObjectStatus.Unbatchable));
-                            unbatchableList.Add(poSeq);
+                            poSeqBatchHandleDict.Add(seqNo, new BatchHandle(null, unbatchableList.Count, ObjectStatus.Unbatched));
+                            unbatchableList.Add(seqNo);
                             continue;
                         }
-                        else if(obj.meshStatus == 1 && obj.baseInfoType == "PROP" && obj.m_textParameters == null)
-                        {
-                            if (!batchOriginalPoIdDict.ContainsKey(obj._baseProp.name))
-                                batchOriginalPoIdDict[obj._baseProp.name] = new List<int>();
-                            if (!batchOriginalArrayDict.ContainsKey(obj._baseProp.name))
-                                batchOriginalArrayDict[obj._baseProp.name] = new List<MeshProperties>();
 
-                            batchOriginalArrayDict[obj._baseProp.name].Add(new MeshProperties(obj));
-                            batchOriginalPoIdDict[obj._baseProp.name].Add(poSeq);
+                        objHashStr = GetObjHashString(obj, sha1);
 
-                            poSeqBatchHandleDict.Add(poSeq, new BatchHandle(obj._baseProp.name, batchOriginalPoIdDict[obj._baseProp.name].Count, ObjectStatus.Original));
-                            //_unmodifiedMeshCount++;
-                            continue;
-                        }
-                        
-                        string objHashStr = GetObjHashString(obj, sha1);
-
-                        // Add listhead OR add followers, choose only one
+                        // Add as the head of a batch OR as a new non-head instance of the batch, choose only one
                         if (!batchCustomArrayDict.ContainsKey(objHashStr) && !batchCustomPoIdDict.ContainsKey(objHashStr))
                         {
+                            poSeqBatchHandleDict.Add(seqNo, new BatchHandle(objHashStr, 0, ObjectStatus.Batched));
+                            batchCustomPoIdDict[objHashStr] = new List<int> { seqNo };
                             batchCustomArrayDict[objHashStr] = new List<MeshProperties> { new MeshProperties(obj) };
-                            batchCustomPoIdDict[objHashStr] = new List<int> { poSeq };
-                            poSeqBatchHandleDict.Add(poSeq, new BatchHandle(objHashStr, batchCustomPoIdDict[objHashStr].Count, ObjectStatus.CustomBatchable));
                         }
                         else
                         {
@@ -123,12 +110,16 @@ namespace ProceduralObjects.Classes
                                 (!IsDifference(obj.m_textParameters, proceduralObjects[listHead].m_textParameters))) &&
                                 CheckMeshEquivalance(obj.m_mesh.vertices, proceduralObjects[listHead].m_mesh.vertices))
                             {
+                                poSeqBatchHandleDict.Add(seqNo, new BatchHandle(objHashStr, batchCustomPoIdDict[objHashStr].Count, ObjectStatus.Batched));
                                 batchCustomArrayDict[objHashStr].Add(new MeshProperties(obj));
-                                batchCustomPoIdDict[objHashStr].Add(poSeq);
-                                poSeqBatchHandleDict.Add(poSeq, new BatchHandle(objHashStr, batchCustomPoIdDict[objHashStr].Count, ObjectStatus.CustomBatchable));
+                                batchCustomPoIdDict[objHashStr].Add(seqNo);
                             }
                             else
-                                unbatchableList.Add(poSeq);
+                            {
+                                poSeqBatchHandleDict.Add(seqNo, new BatchHandle(null, unbatchableList.Count, ObjectStatus.Unbatched));
+                                unbatchableList.Add(seqNo);
+                            }
+                            //poSeqBatchHandleDict.Add(seqNo, AddToNewBatchingList(seqNo, objHashStr, null));
                         }
                     }
                 }
@@ -138,15 +129,16 @@ namespace ProceduralObjects.Classes
                 {
                     if (kv.Value.Count >= _minimumBatchSize)
                     {
-                        _repeateModifiedMeshCount += kv.Value.Count;
-                        Debug.Log($"[ProceduralObjects] Quad {bounds.center} loaded repeated meshStatus 2 meshes, meshId: {kv.Key}, count: {kv.Value.Count}");
+                        _batchedPropMeshCount += kv.Value.Count;
+                        Debug.Log($"[ProceduralObjects] Quad {bounds.center} loaded batched meshes, meshId: {kv.Key}, count: {kv.Value.Count}");
                     }
                     else
                     {
+                        Debug.Log($"[ProceduralObjects] Quad {bounds.center} loaded repeated but insufficient meshes, meshId: {kv.Key}, count: {kv.Value.Count}");
                         for (int i = 0; i < kv.Value.Count; i++)
                         {
                             int poSeq = kv.Value[i];
-                            poSeqBatchHandleDict[poSeq] = new BatchHandle(null, unbatchableList.Count, ObjectStatus.Unbatchable);
+                            poSeqBatchHandleDict[poSeq] = new BatchHandle(null, unbatchableList.Count, ObjectStatus.Unbatched);
                             unbatchableList.Add(poSeq);
                         }
                         keysToRemove.Add(kv.Key);
@@ -159,39 +151,9 @@ namespace ProceduralObjects.Classes
                     batchCustomPoIdDict.Remove(keyToRemove);
                 }
 
-                keysToRemove.Clear();
-                foreach (var kv in batchOriginalPoIdDict)
+                if (_batchedPropMeshCount > 0)
                 {
-                    if (kv.Value.Count >= _minimumBatchSize)
-                    {
-                        _unmodifiedMeshCount += kv.Value.Count;
-                        Debug.Log($"[ProceduralObjects] Quad {bounds.center} loaded batchable unmodified meshStatus 1 meshes, meshId: {kv.Key}, count: {kv.Value.Count}");
-                    }
-                    else
-                    {
-                        for (int i = 0; i < kv.Value.Count; i++)
-                        {
-                            int poSeq = kv.Value[i];
-                            poSeqBatchHandleDict[poSeq] = new BatchHandle(null, unbatchableList.Count, ObjectStatus.Unbatchable);
-                            unbatchableList.Add(poSeq);
-                        }
-
-                        keysToRemove.Add(kv.Key);
-
-                    }
-                }
-
-                for (int i = 0; i < keysToRemove.Count; i++)
-                {
-                    string keyToRemove = keysToRemove[i];
-                    batchOriginalArrayDict.Remove(keyToRemove);
-                    batchOriginalPoIdDict.Remove(keyToRemove);
-                }
-
-                if (_unmodifiedMeshCount + _repeateModifiedMeshCount > 0)
-                {
-                    Debug.Log($"[ProceduralObjects] In Quad {bounds.center}, total batchable unmodified meshStatus 1 meshes counting at: {_unmodifiedMeshCount}, " +
-                        $"total batchable repeated meshStatus 2 meshes counting at: {_repeateModifiedMeshCount}");
+                    Debug.Log($"[ProceduralObjects] In Quad {bounds.center}, total batchable meshes counting at: {_batchedPropMeshCount}.");
                 }
 
             }
@@ -276,17 +238,20 @@ namespace ProceduralObjects.Classes
 
         public string GetObjHashString(ProceduralObject obj, SHA1 sha1)
         {
+            StringBuilder sb = new StringBuilder(obj._baseProp.name);
+            sb.Append("_");
+
+            // NOTE: If later it needs to rollback to have meshStatus == 1 objects skipping calculating SHA1 hashes, just modify here.
+            // By skipping serializing and hashing the mesh vertices and place a placeholder "NO_MODIFICATION" should be enough.
             Vector3[] vertices = obj.m_mesh.vertices;
             MemoryStream stream = new MemoryStream();
             Serializer.Serialize(stream, SerializableVector3.ToSerializableArray(vertices));
             stream.Position = 0;
             byte[] meshHashBytes = sha1.ComputeHash(stream);
             stream.Close();
-
-            StringBuilder sb = new StringBuilder(obj._baseProp.name);
-            sb.Append("_");
             for (int i = 0; i < meshHashBytes.Length; i++)
                 sb.Append(meshHashBytes[i].ToString("X2"));
+
             sb.Append("_");
 
             if (obj.m_textParameters != null)
@@ -367,7 +332,7 @@ namespace ProceduralObjects.Classes
             else
             {
                 string poMeshIdentifierString = poSeqBatchHandleDict[seqNo].identifierString;
-                RemoveFromQuad(seqNo);
+                RemoveObjectFromQuad(seqNo);
                 Quad newQuadToJoin = LocateQuadLeafFromPosition(obj.m_position);
                 newQuadToJoin.TakeInNewPo(seqNo, poMeshIdentifierString);
                 obj.ownerQuad = newQuadToJoin;
@@ -375,7 +340,7 @@ namespace ProceduralObjects.Classes
         }
 
         /// <summary>
-        /// The method to handle Procedural Objects with dirty mesh. Currently it only places object into an existing batch.
+        /// The method to handle Procedural Objects with dirty mesh. Currently it only places object into an existing batch or unbatch the object.
         /// </summary>
         public void HandleObjectDirtyMesh(int seqNo)
         {
@@ -383,86 +348,58 @@ namespace ProceduralObjects.Classes
             if (null == obj) 
                 return;
             BatchHandle handle = poSeqBatchHandleDict[seqNo];
-            if (handle.objectStatus == ObjectStatus.Unbatchable)
+            // Exclude objects that are not batched and are not able to be batched
+            if (handle.objectStatus == ObjectStatus.Unbatched && !IsPoAbleToBeBatched(obj))
             {
                 return;
             }
-
             List<int> objPrevBatchPoSeqList = ResolveIntListByPoSeq(seqNo);
             List<MeshProperties> objPrevBatchMeshPropertiesList = ResolveMeshPropertiesListByPoSeq(seqNo);
 
-            // Move object to unbatchable list if they were batched but has become unbatchable.
-            // TODO: There are more conditions that should be taken into consideration but didn't find the
-            // corresponding field names or the default values in ProceduralObject instances, for example, the RecalculateNormal flags. 
-            if (handle.objectStatus != ObjectStatus.Unbatchable && 
-                (obj.baseInfoType == "BUILDING" || obj.customTexture != null || !obj.m_material.shader.name.Equals(batchedPropShaderStr)))
+            // Move object to unbatchable list if they were batched but has become unbatchable. Then put the object into the queue for checking its shader
+            if (handle.objectStatus == ObjectStatus.Batched && !IsPoAbleToBeBatched(obj))
             {
-                //poSeqBatchHandleDict.Add(seqNo, new BatchHandle(null, unbatchableList.Count, ObjectStatus.Unbatchable));
-                handle.identifierString = null;
-                handle.indexInList = unbatchableList.Count;
-                handle.objectStatus = ObjectStatus.Unbatchable;
-                unbatchableList.Add(seqNo);
-                if (objPrevBatchPoSeqList != null)
-                {
-                    objPrevBatchMeshPropertiesList.RemoveAtSwapBack(handle.indexInList);
-                }
-                if (objPrevBatchMeshPropertiesList != null)
-                {
-                    objPrevBatchPoSeqList.RemoveAtSwapBack(handle.indexInList);
-                }
+                RemoveFromPreviousBatchingList(seqNo, handle);
+
+                poSeqBatchHandleDict[seqNo] = AddToNewBatchingList(seqNo, null, handle);
+
+                return;
             }
-            string propPrefabName = obj.basePrefabName;
-            Mesh basePropMesh = PropInfoHelper.GetPropInfo(propPrefabName).m_mesh;
-            // Process situation when obj.meshStatus become 1
-            if (obj.meshStatus == 1)
+
+            // The remaining situations include unbatchable objects become batchable, and batchable objects still being batchable
+            // Branching condition: only if a current batch with the same objHashStr exists should the object be batched.
+            // Otherwise all objects that are batchable but no matching current batch found should be handled as unbatched in game.
+            // They will be batched after next load cycle if they really are.
+            // For those batched but become unbatched, and those unbatched but batched after the dirty mesh, send them to the shader checking queue.
+            SHA1 sha1 = HelperPool.GetSHA1Instance();
+            string objHashStr = GetObjHashString(obj, sha1);
+
+            // Remove from old batch or unbatched list
+            RemoveFromPreviousBatchingList(seqNo, handle);
+
+            // If existing matching batch found.
+            if (batchCustomPoIdDict.ContainsKey(objHashStr) && batchCustomArrayDict.ContainsKey(objHashStr))
             {
-                if (basePropMesh != null && obj.m_mesh != null)
-                {
-                    bool isMeshSame = CheckMeshEquivalance(basePropMesh.vertices, obj.m_mesh.vertices);
+                // Move to the new batch
+                poSeqBatchHandleDict[seqNo] = AddToNewBatchingList(seqNo, objHashStr, handle);
 
-                    if (isMeshSame && batchOriginalPoIdDict.ContainsKey(propPrefabName) && objPrevBatchPoSeqList != batchOriginalPoIdDict[propPrefabName])
-                    {
-                        // Remove from previous list if they are not null and not the same with the original one.
-                        objPrevBatchPoSeqList?.RemoveAtSwapBack(handle.indexInList);
-                        objPrevBatchMeshPropertiesList?.RemoveAtSwapBack(handle.indexInList);
-
-                        // Update batchHandle and add to new list.
-                        handle.identifierString = propPrefabName;
-                        handle.indexInList = batchOriginalPoIdDict[propPrefabName].Count();
-                        handle.objectStatus = ObjectStatus.Original;
-
-                        batchOriginalPoIdDict[propPrefabName].Add(seqNo);
-                        batchOriginalArrayDict[propPrefabName].Add(new MeshProperties(obj));
-
-                        return;
-                    }
-                    else if (!isMeshSame && handle.objectStatus != ObjectStatus.Unbatchable)
-                    {
-
-                    }
-                }
             }
-            else if (obj.meshStatus == 2)
+            // No existing matching batch found.
+            else
             {
-                SHA1 sha1 = HelperPool.GetSHA1Instance();
-                string objHashStr = GetObjHashString(obj, sha1);
+                poSeqBatchHandleDict[seqNo] = AddToNewBatchingList(seqNo, null, handle);
 
-
-
-                HelperPool.ReturnSHA1Instance(sha1);
             }
+
+            HelperPool.ReturnSHA1Instance(sha1);
         }
 
         public List<MeshProperties> ResolveMeshPropertiesListByPoSeq(int seqNo)
         {
             BatchHandle handle = poSeqBatchHandleDict[seqNo];
-            if (handle.objectStatus == ObjectStatus.Unbatchable)
+            if (handle.objectStatus == ObjectStatus.Unbatched)
             {
                 return null;
-            }
-            else if (handle.objectStatus == ObjectStatus.Original)
-            {
-                return batchOriginalArrayDict[handle.identifierString];
             }
             else
             {
@@ -473,13 +410,9 @@ namespace ProceduralObjects.Classes
         public List<int> ResolveIntListByPoSeq(int seqNo)
         {
             BatchHandle handle = poSeqBatchHandleDict[seqNo];
-            if (handle.objectStatus == ObjectStatus.Unbatchable)
+            if (handle.objectStatus == ObjectStatus.Unbatched)
             {
                 return null;
-            }
-            else if (handle.objectStatus == ObjectStatus.Original)
-            {
-                return batchOriginalPoIdDict[handle.identifierString];
             }
             else
             {
@@ -487,49 +420,26 @@ namespace ProceduralObjects.Classes
             }
         }
 
-        private void RemoveFromQuad(int seqNo)
+        public void RemoveObjectFromQuad(int seqNo)
         {
             BatchHandle handle = poSeqBatchHandleDict[seqNo];
             allPoSeqSet.Remove(seqNo);
+            RemoveFromPreviousBatchingList(seqNo, handle);
+            poSeqBatchHandleDict.Remove(seqNo);
             int seqNoIndexInAllPoSeqList = allPoSeqList.IndexOf(seqNo);
             if (seqNoIndexInAllPoSeqList >= 0)
             {
                 allPoSeqList.RemoveAtSwapBack(seqNoIndexInAllPoSeqList);
             }
 
-            List<MeshProperties> batchMeshPropertiesList = ResolveMeshPropertiesListByPoSeq(seqNo);
-            if (batchMeshPropertiesList == null)  // which means the object is not batchable, i.e. tagged with ObjectStatus.Unbatchable
-            {
-                return;
-            }
-            List<int> batchPoSeqList = ResolveIntListByPoSeq(seqNo);
-            batchMeshPropertiesList.RemoveAtSwapBack(handle.indexInList);
-            batchPoSeqList.RemoveAtSwapBack(handle.indexInList);
-            poSeqBatchHandleDict.Remove(seqNo);
         }
 
-        public void TakeInNewPo(int seqNo, string identifierString)
+        public void TakeInNewPo(int seqNo, string objHashStr)
         {
             allPoSeqList.Add(seqNo);
             allPoSeqSet.Add(seqNo);
             ProceduralObject obj = ProceduralObjectsLogic.instance.proceduralObjects[seqNo];
-            if (identifierString != null && batchOriginalPoIdDict.ContainsKey(identifierString))
-            {
-                poSeqBatchHandleDict.Add(seqNo, new BatchHandle(identifierString, batchOriginalPoIdDict[identifierString].Count, ObjectStatus.Original));
-                batchOriginalPoIdDict[identifierString].Add(seqNo);
-                batchOriginalArrayDict[identifierString].Add(new MeshProperties(obj));
-            }
-            else if (identifierString != null && batchCustomPoIdDict.ContainsKey(identifierString))
-            {
-                poSeqBatchHandleDict.Add(seqNo, new BatchHandle(identifierString, batchCustomPoIdDict[identifierString].Count, ObjectStatus.CustomBatchable));
-                batchCustomPoIdDict[identifierString].Add(seqNo);
-                batchCustomArrayDict[identifierString].Add(new MeshProperties(obj));
-            }
-            else
-            {
-                poSeqBatchHandleDict.Add(seqNo, new BatchHandle(null, unbatchableList.Count, ObjectStatus.Unbatchable));
-                unbatchableList.Add(seqNo);
-            }
+            poSeqBatchHandleDict.Add(seqNo, AddToNewBatchingList(seqNo, objHashStr, null));
         }
 
         private Quad LocateQuadLeafFromPosition(Vector3 position)
@@ -569,10 +479,80 @@ namespace ProceduralObjects.Classes
             }
             return ProceduralObjectsLogic.instance.proceduralObjects[seqNo];
         }
+
+        private bool IsPoAbleToBeBatched(ProceduralObject obj)
+        {
+            // TODO: Consider adding checks for environment compatibility. For example, if the host GPU
+            // cannot handle DrawMeshInstancedIndirect, that should make ALL POs unbatchable.
+            // TODO: There are more conditions that should be taken into consideration but didn't find the
+            // corresponding field names or the default values in ProceduralObject instances, for example, the RecalculateNormal flags. 
+            if (obj.baseInfoType == "BUILDING" || obj.customTexture != null || 
+                (!obj.m_material.shader.name.Equals(defaultPropShaderStr) && !obj.m_material.shader.name.Equals(batchedPropShaderStr)))
+                return false;
+            return true;
+        }
+
+        private void RemoveFromPreviousBatchingList(int seqNo, BatchHandle handle)
+        {
+            if (handle.identifierString == null && handle.objectStatus == ObjectStatus.Unbatched)
+            {
+                unbatchableList.RemoveAtSwapBack(handle.indexInList);
+            }
+            else
+            {
+                List<int> objPrevBatchPoSeqList = ResolveIntListByPoSeq(seqNo);
+                List<MeshProperties> objPrevBatchMeshPropertiesList = ResolveMeshPropertiesListByPoSeq(seqNo);
+                objPrevBatchPoSeqList?.RemoveAtSwapBack(handle.indexInList);
+                objPrevBatchMeshPropertiesList?.RemoveAtSwapBack(handle.indexInList);
+            }
+        }
+
+        private BatchHandle AddToNewBatchingList(int seqNo, string objHashStr, BatchHandle handle)
+        {
+            if (handle == null)
+                handle = new BatchHandle(null, unbatchableList.Count, ObjectStatus.Unbatched);
+            ProceduralObject obj = ProceduralObjectsLogic.instance.proceduralObjects[seqNo];
+            ShaderConversionController conversionController = ProceduralObjectsLogic.instance.shaderConversionController;
+            if (objHashStr != null && batchCustomPoIdDict.ContainsKey(objHashStr) && 
+                batchCustomArrayDict.ContainsKey(objHashStr) && IsPoAbleToBeBatched(obj))
+            {
+                ProceduralObject listHead = ProceduralObjectsLogic.instance.proceduralObjects[batchCustomPoIdDict[objHashStr][0]];
+                if (((obj.m_textParameters == null && listHead.m_textParameters == null) ||
+                    (!IsDifference(obj.m_textParameters, listHead.m_textParameters))) &&
+                    CheckMeshEquivalance(obj.m_mesh.vertices, listHead.m_mesh.vertices))
+                {
+                    // Move to the new batch
+                    handle.identifierString = objHashStr;
+                    handle.indexInList = batchCustomPoIdDict[objHashStr].Count;
+                    handle.objectStatus = ObjectStatus.Batched;
+                    batchCustomPoIdDict[objHashStr].Add(seqNo);
+                    batchCustomArrayDict[objHashStr].Add(new MeshProperties(obj));
+                    // TODO: Add the object to the shader checking queue, change the shader to batched shader.
+                    if (conversionController != null)
+                    {
+                        conversionController.DefaultPropConvertToInstancedShader(obj);
+                    }
+
+                    return handle;
+                }
+            }
+            // No existing matching batch found, or hash match found but indeed different with listHead.
+            handle.identifierString = null;
+            handle.indexInList = unbatchableList.Count;
+            handle.objectStatus = ObjectStatus.Unbatched;
+            unbatchableList.Add(seqNo);
+            // TODO: Add the object to the shader checking queue, change the shader to the original shader.
+            if (conversionController != null)
+            {
+                conversionController.DefaultPropConvertToOriginalShader(obj);
+            }
+
+            return handle;
+        }
     }
 
 
-    internal struct BatchHandle
+    internal class BatchHandle
     {
         public string identifierString;
         public int indexInList;
@@ -588,6 +568,6 @@ namespace ProceduralObjects.Classes
 
     internal enum ObjectStatus
     {
-        Original, CustomBatchable, Unbatchable
+        Batched, Unbatched
     }
 }
