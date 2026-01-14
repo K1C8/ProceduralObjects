@@ -93,6 +93,8 @@ namespace ProceduralObjects
         public MeasurementsManager measurementsManager;
         public SelectionFilters filters;
 
+        public ShaderConversionController shaderConversionController;
+
         public int lastGCCount;
         public double cacheSortTime;
         public double totalBatchingTime;
@@ -116,6 +118,7 @@ namespace ProceduralObjects
              = new ConcurrentDictionary<int, MeshProperties[]>();
         private readonly ConcurrentDictionary<int, int> equivalentDictUsageTracker
             = new ConcurrentDictionary<int, int>();
+        private bool[] visibilityArray;
         //private ConcurrentDictionary<Mesh, Material> equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
         private List<int> unbatchedPoSeqList = new List<int>();
         //private List<int> overlayList = new List<int>();
@@ -136,7 +139,7 @@ namespace ProceduralObjects
         //private ComputeBuffer meshPropertiesBuffer;
         //private uint[] args;
 
-        private static Dictionary<int, int> _groupRootCache = new Dictionary<int, int>();
+        private static Dictionary<int, int> _poIdToSeqNoCache = new Dictionary<int, int>();
 
         void Start()
         {
@@ -266,6 +269,7 @@ namespace ProceduralObjects
             Debug.Log(string.Format("[ProceduralObjects] Checking for compatibility, isGPUSupportInstancing: {0}, shaders contains testshaderind: {1}", isGPUSupportInstancing, loadedShaders.ContainsKey("Custom/ProceduralObject/Prop/testshaderind")));
 
             long updateCount = 0;
+            visibilityArray = new bool[proceduralObjects.Count];
 
             if (isGPUSupportInstancing && proceduralObjects != null && loadedShaders.ContainsKey("Custom/ProceduralObject/Prop/testshaderind"))
             {
@@ -278,12 +282,14 @@ namespace ProceduralObjects
                     maxThreadCount = Environment.ProcessorCount <= 64 ? Environment.ProcessorCount : 64;
                 }
                 //string instancingKeyword = "INSTANCING_ON";
-                string shadeCastingKeyword = "SHADOWS_SCREEN";
+                //string shadeCastingKeyword = "SHADOWS_SCREEN";
                 equivalentPropertiesComputeBuffer = new Dictionary<int, ComputeBuffer>();
                 equivalentArgsComputeBuffer = new Dictionary<int, ComputeBuffer>();
                 uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
                 loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testshaderind", out Shader instancedTestShader);
-                
+                shaderConversionController = new ShaderConversionController();
+                shaderConversionController.DefaultPropInstancedShader = instancedTestShader;
+
                 List<Quad> leafQuads = quadTree.GetLeafQuads();
                 HashSet<int> unbatchedPoSeqs = new HashSet<int>();
 
@@ -298,19 +304,24 @@ namespace ProceduralObjects
                         continue;
 
                     var obj = proceduralObjects[i];
-                    if (obj.m_material.shader.name.Equals("Custom/Props/Prop/Default"))
+                    shaderConversionController.DefaultPropConvertToInstancedShader(obj);
+                    if (obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testshaderind"))
                     {
-                        obj.m_material.shader = instancedTestShader;
-                        obj.m_material.EnableKeyword(shadeCastingKeyword);
-                        obj.m_material.enableInstancing = true;
                         updateCount++;
-#if DEBUG
-                        Debug.Log(string.Format("[ProceduralObjects] Modifing {0}, {1}, {2} properties of shader {3} to {4}, {5}, {6}",
-                            instancingKeyword, "", "", 
-                            proceduralObjects[i].m_material.shader.name, 
-                            proceduralObjects[i].m_material.IsKeywordEnabled(instancingKeyword), proceduralObjects[i].m_material.IsKeywordEnabled(instancingKeyword), proceduralObjects[i].m_material.IsKeywordEnabled(instancingKeyword)));
-#endif
                     }
+//                    if (obj.m_material.shader.name.Equals("Custom/Props/Prop/Default"))
+//                    {
+//                        obj.m_material.shader = instancedTestShader;
+//                        obj.m_material.EnableKeyword(shadeCastingKeyword);
+//                        obj.m_material.enableInstancing = true;
+//                        updateCount++;
+//#if DEBUG
+//                        Debug.Log(string.Format("[ProceduralObjects] Modifing {0}, {1}, {2} properties of shader {3} to {4}, {5}, {6}",
+//                            instancingKeyword, "", "", 
+//                            proceduralObjects[i].m_material.shader.name, 
+//                            proceduralObjects[i].m_material.IsKeywordEnabled(instancingKeyword), proceduralObjects[i].m_material.IsKeywordEnabled(instancingKeyword), proceduralObjects[i].m_material.IsKeywordEnabled(instancingKeyword)));
+//#endif
+//                    }
 
                 }
                 unbatchedPoSeqs.Clear();
@@ -423,6 +434,14 @@ namespace ProceduralObjects
                 {
                     equivalentDictUsageTracker[kv.Key] = 0;
                 }
+                if (proceduralObjects.Count != visibilityArray.Length)
+                {
+                    visibilityArray = new bool[proceduralObjects.Count];
+                }
+                for (int i = 0; i < visibilityArray.Length; i++)
+                {
+                    visibilityArray[i] = false;
+                }
                 //overlayList.Clear(); 
 
                 List<Quad> leafQuads = quadTree.GetLeafQuads();
@@ -442,7 +461,7 @@ namespace ProceduralObjects
                 }
                 //Debug.Log(sb.ToString());
 
-                HashSet<int> visibilitySet = HelperPool.GetVisibilitySet();
+                //HashSet<int> visibilitySet = HelperPool.GetVisibilitySet();
 
                 var sqrDynMinThreshold = ProceduralObjectsMod.DynamicRDMinThreshold.value * ProceduralObjectsMod.DynamicRDMinThreshold.value;
                 bool isNightTime = Singleton<SimulationManager>.instance.m_isNightTime;
@@ -452,17 +471,21 @@ namespace ProceduralObjects
                     () => HelperPool.GetIntList(),
                     (i, loop, localList) =>
                 {
-                    int poSeq = viewportPoSeqList[i];
-                    var obj = proceduralObjects[poSeq];
+                    int seqNo = viewportPoSeqList[i];
+                    var obj = proceduralObjects[seqNo];
                     if (ProceduralUtils.TestPoInViewAndProcess(obj, renderCamera, camPos, sqrDynMinThreshold, isNightTime))
-                        localList.Add(poSeq);
+                        localList.Add(seqNo);
                     return localList;
 
                 }, localList =>
                 {
                     lock (listLock)
                     {
-                        visibilitySet.UnionWith(localList);
+                        //visibilitySet.UnionWith(localList);
+                        foreach (int seqNo in localList)
+                        {
+                            visibilityArray[seqNo] = true;
+                        }
                     }
                     HelperPool.ReturnIntList(localList);
                 });
@@ -474,14 +497,15 @@ namespace ProceduralObjects
                     Quad current = visibleLeafQuads[i];
                     for (int j = 0; j < current.unbatchableList.Count; j ++)
                     {
-                        int poSeq = current.unbatchableList[j];
+                        int seqNo = current.unbatchableList[j];
 
-                        if (visibilitySet.Contains(poSeq))
-                            localLists.localUnbatchedList.Add(poSeq);
+                        //if (visibilitySet.Contains(seqNo))
+                        if (visibilityArray[seqNo])
+                            localLists.localUnbatchedList.Add(seqNo);
                     }
 
-                    ProceduralUtils.ProcessBatchablePoDict(localLists, current.batchOriginalPoIdDict, current.batchOriginalArrayDict, visibilitySet);
-                    ProceduralUtils.ProcessBatchablePoDict(localLists, current.batchCustomPoIdDict, current.batchCustomArrayDict, visibilitySet);
+                    //ProceduralUtils.ProcessBatchablePoDict(localLists, current.batchOriginalPoIdDict, current.batchOriginalArrayDict, visibilitySet);
+                    ProceduralUtils.ProcessBatchablePoDict(localLists, current.batchCustomPoIdDict, current.batchCustomArrayDict, visibilityArray);
 
                     //Debug.Log($"[ProceduralObjects] Quad {current.bounds.center} has {localLists.localUnbatchedList.Count} POs are unbatched, and has" +
                     //    $" {localLists.localBatchDict.Count} types of batched POs.");
@@ -586,7 +610,7 @@ namespace ProceduralObjects
                 }
 
                 HelperPool.ReturnIntList(viewportPoSeqList);
-                HelperPool.ReturnVisibilitySet(visibilitySet);
+                //HelperPool.ReturnVisibilitySet(visibilitySet);
                 leafQuads.Clear();
 
                 lastRenderTime = DateTime.Now;
@@ -830,9 +854,11 @@ namespace ProceduralObjects
                                             if (obj.group != null)
                                                 obj.group.Remove(this, obj);
                                             moduleManager.DeleteAllModules(obj);
-                                            proceduralObjects.Remove(obj);
+                                            int seqNo = proceduralObjects.GetSeqNoWithId(obj.id);
+                                            InvalidSeqCacheById(obj.id); // Caching Test
+                                            //proceduralObjects[seqNo] = null;
+                                            //proceduralObjects.Remove(obj);
                                             activeIds.Remove(obj.id);
-                                            InvalidCacheById(obj.id); // Caching Test
                                         }
                                         pObjSelection.Clear();
                                     });
@@ -2411,6 +2437,7 @@ namespace ProceduralObjects
                     var uiObj = (selectedGroup == null ? proceduralObjects.ToList() : selectedGroup.objects.ToList());
                     foreach (ProceduralObject obj in uiObj)
                     {
+                        if (obj == null) continue; // Temp test.
                         if (selectedGroup == null)
                         {
                             if (obj.group != null && !obj.isRootOfGroup)
@@ -2543,11 +2570,13 @@ namespace ProceduralObjects
                                                     if (obj.group != null)
                                                         obj.group.Remove(this, obj);
                                                     moduleManager.DeleteAllModules(obj);
-                                                    proceduralObjects.Remove(obj);
+                                                    int seqNo = proceduralObjects.GetSeqNoWithId(obj.id);
+                                                    InvalidSeqCacheById(obj.id); // Caching Test
+                                                    //proceduralObjects[seqNo] = null;
+                                                    //proceduralObjects.Remove(obj);
                                                     activeIds.Remove(obj.id);
                                                     pObjSelection.Remove(obj);
                                                     hoveredObj = null;
-                                                    InvalidCacheById(obj.id); // Caching Test
                                                 });
                                             }
                                         }
@@ -2709,9 +2738,11 @@ namespace ProceduralObjects
                                                     if (po.group != null)
                                                         po.group.Remove(this, po);
                                                     moduleManager.DeleteAllModules(po);
-                                                    proceduralObjects.Remove(po);
+                                                    int seqNo = proceduralObjects.GetSeqNoWithId(po.id);
+                                                    InvalidSeqCacheById(po.id); // Caching Test
+                                                    //proceduralObjects[seqNo] = null;
+                                                    //proceduralObjects.Remove(po);
                                                     activeIds.Remove(po.id);
-                                                    InvalidCacheById(po.id); // Caching Test
                                                 }
                                                 pObjSelection.Clear();
                                             });
@@ -3942,9 +3973,11 @@ namespace ProceduralObjects
                         if (po.group != null)
                             po.group.Remove(this, po);
                         moduleManager.DeleteAllModules(po);
-                        proceduralObjects.Remove(po);
+                        int seqNo = proceduralObjects.GetSeqNoWithId(po.id);
+                        InvalidSeqCacheById(po.id); // Caching Test
+                        //proceduralObjects[seqNo] = null;
+                        //proceduralObjects.Remove(po);
                         activeIds.Remove(po.id);
-                        InvalidCacheById(po.id); // Caching Test
                     }
                     ConfirmMovingWhole(false);
                 }
@@ -4324,9 +4357,11 @@ namespace ProceduralObjects
                 textManager.CloseWindow();
                 advEdManager = null;
                 moduleManager.DeleteAllModules(currentlyEditingObject);
-                proceduralObjects.Remove(currentlyEditingObject);
+                int seqNo = proceduralObjects.GetSeqNoWithId(currentlyEditingObject.id);
+                InvalidSeqCacheById(currentlyEditingObject.id); // Caching Test
+                //proceduralObjects[seqNo] = null;
+                //proceduralObjects.Remove(currentlyEditingObject);
                 activeIds.Remove(currentlyEditingObject.id);
-                InvalidCacheById(currentlyEditingObject.id); // Caching Test
 
                 if (currentlyEditingObject.group != null)
                     currentlyEditingObject.group.Remove(this, currentlyEditingObject);
@@ -4615,7 +4650,7 @@ namespace ProceduralObjects
 
         public int GetCachedSeqNoById(int id)
         {
-            if (_groupRootCache.TryGetValue(id, out var cached))
+            if (_poIdToSeqNoCache.TryGetValue(id, out var cached))
                 return cached;
             return -1;
         }
@@ -4623,14 +4658,19 @@ namespace ProceduralObjects
         public void AddObjectToCacheByListIndex(int index)
         {
             var id = proceduralObjects[index].id;
-            _groupRootCache[id] = index;
+            _poIdToSeqNoCache[id] = index;
         }
 
-        public void InvalidCacheById(int id)
+        public void InvalidSeqCacheById(int id)
         {
-            if (_groupRootCache.ContainsKey(id)) 
+            int seqNo = proceduralObjects.GetSeqNoWithId(id);
+            if (seqNo > -1)
             {
-                _groupRootCache.Remove(id);
+                ChangeTracker.RemoveObjectFromQuadTree(seqNo);
+            }
+            if (_poIdToSeqNoCache.ContainsKey(id)) 
+            {
+                _poIdToSeqNoCache.Remove(id);
             }
         }
 

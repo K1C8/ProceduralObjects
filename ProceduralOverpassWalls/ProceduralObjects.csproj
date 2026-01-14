@@ -79,6 +79,7 @@
     <Compile Include="Classes\Quad.cs" />
     <Compile Include="Classes\QuadTree.cs" />
     <Compile Include="Classes\RenderOptions.cs" />
+    <Compile Include="Classes\ShaderConversionController.cs" />
     <Compile Include="Classes\StatisticsManager.cs" />
     <Compile Include="ProceduralModules\ModuleManager.cs" />
     <Compile Include="ProceduralModules\POModule.cs" />

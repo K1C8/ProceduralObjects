@@ -69,12 +69,13 @@ namespace ProceduralObjects.Classes
             // Check cache first
             var logic = ProceduralObjectsLogic.instance;
             var cached = logic.GetCachedSeqNoById(id);
-            if (cached > -1)
+            if (cached > -1 && list[cached] != null && list[cached].id == id)
                 return cached;
 
             // Fallback to slow search
             for (int i = 0; i < list.Count; i++)
             {
+                if (list[i] == null) continue;
                 if (list[i].id == id)
                 {
                     // logic._groupRootCache[id] = list[i]; // store for future lookups
@@ -863,6 +864,7 @@ namespace ProceduralObjects.Classes
 
         public static bool TestPoInViewAndProcess(ProceduralObject obj, Camera cam, Vector3 camPos, float sqrDynMinThreshold, bool isNightTime)
         {
+            if (obj == null) return false;
             if ((obj.layer != null && obj.layer.m_isHidden) || !RenderOptions.instance.CanRenderSingle(obj, isNightTime))
                 return false;
 
@@ -899,6 +901,7 @@ namespace ProceduralObjects.Classes
                 int poSeq = quadPoSeqList[i];
                 var obj = instance.proceduralObjects[poSeq];
 
+                if (obj == null) continue;
                 if ((obj.layer != null && obj.layer.m_isHidden) || !RenderOptions.instance.CanRenderSingle(obj, isNightTime))
                     continue;
 
@@ -930,7 +933,7 @@ namespace ProceduralObjects.Classes
 
         public static void ProcessBatchablePoDict(
             SortingLists sortingList, Dictionary<string, List<int>> seqDict, Dictionary<string, List<MeshProperties>> meshPropertiesDict, 
-            HashSet<int> visibleSet)
+            bool[] visibilityArray)
         {
             foreach (KeyValuePair<string, List<int>> kv in seqDict)
             {
@@ -948,10 +951,11 @@ namespace ProceduralObjects.Classes
                     List<MeshProperties> quadBatchDictMeshPropertiesList = meshPropertiesDict[kv.Key];
                     for (int j = 0; j < kv.Value.Count; j++)
                     {
-                        int poSeq = kv.Value[j];
-                        //var obj = instance.proceduralObjects[poSeq];
+                        int seqNo = kv.Value[j];
+                        //var obj = instance.proceduralObjects[seqNo];
 
-                        if (visibleSet.Contains(poSeq))
+                        //if (visibleSet.Contains(seqNo))
+                        if (visibilityArray[seqNo])
                             frameCacheDictList.Add(quadBatchDictMeshPropertiesList[j]);
                     }
                     //list.AddRange(propsDict[key]);
@@ -960,10 +964,10 @@ namespace ProceduralObjects.Classes
                 //{
                 //    for (int j = 0; j < seqDict[key].Count; j++)
                 //    {
-                //        int poSeq = seqDict[key][j];
+                //        int seqNo = seqDict[key][j];
 
-                //        if (set.Contains(poSeq))
-                //            sortingList.localUnbatchedList.Add(poSeq);
+                //        if (set.Contains(seqNo))
+                //            sortingList.localUnbatchedList.Add(seqNo);
                 //    }
                 //    //sortingList.localUnbatchedList.AddRange(seqDict[key]);
                 //}

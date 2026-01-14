@@ -15,6 +15,8 @@ namespace ProceduralObjects.Classes
         private readonly HashSet<int> _dirtyMeshProperties = new HashSet<int>();
         private readonly HashSet<int> _dirtyMesh = new HashSet<int>();
         private readonly HashSet<int> _dirtyMaterial = new HashSet<int>();
+        private readonly HashSet<int> _dirtyShader = new HashSet<int>();
+        private readonly HashSet<int> _objectsToRemove = new HashSet<int>();
 
         private ChangeTracker() { }
 
@@ -25,6 +27,8 @@ namespace ProceduralObjects.Classes
                 _instance._dirtyMeshProperties.Clear();
                 _instance._dirtyMesh.Clear();
                 _instance._dirtyMaterial.Clear();
+                _instance._dirtyShader.Clear();
+                _instance._objectsToRemove.Clear();
             }
         }
 
@@ -44,6 +48,17 @@ namespace ProceduralObjects.Classes
         {
             Tracker._dirtyMaterial.Add(seqNo);
         }
+
+        public static void MarkShaderDirty(int seqNo)
+        {
+            Tracker._dirtyShader.Add(seqNo);
+        }
+
+        public static void RemoveObjectFromQuadTree(int seqNo)
+        {
+            Tracker._objectsToRemove.Add(seqNo);
+        }
+
         public void Process()
         {
             foreach (int seqNo in _dirtyMeshProperties)
@@ -54,8 +69,8 @@ namespace ProceduralObjects.Classes
                     Debug.Log(string.Format("[ProceduralObjects] ChangeTracker got an invalid seqNo: {0}.", seqNo));
                     continue;
                 }
-                Quad quad = ProceduralObjectsLogic.instance.proceduralObjects[seqNo].ownerQuad;
-                quad.HandleObjectDirtyMeshProperties(seqNo);
+                Quad quad = ProceduralObjectsLogic.instance.proceduralObjects[seqNo]?.ownerQuad;
+                quad?.HandleObjectDirtyMeshProperties(seqNo);
             }
             _dirtyMeshProperties.Clear();
 
@@ -67,6 +82,9 @@ namespace ProceduralObjects.Classes
                     Debug.Log(string.Format("[ProceduralObjects] ChangeTracker got an invalid seqNo: {0}.", seqNo));
                     continue;
                 }
+
+                Quad quad = ProceduralObjectsLogic.instance.proceduralObjects[seqNo]?.ownerQuad;
+                quad?.HandleObjectDirtyMesh(seqNo);
             }
             _dirtyMesh.Clear();
 
@@ -78,8 +96,26 @@ namespace ProceduralObjects.Classes
                     Debug.Log(string.Format("[ProceduralObjects] ChangeTracker got an invalid seqNo: {0}.", seqNo));
                     continue;
                 }
+
+                Quad quad = ProceduralObjectsLogic.instance.proceduralObjects[seqNo]?.ownerQuad;
+                //quad?.HandleObjectDirtyMaterial(seqNo);
             }
             _dirtyMaterial.Clear();
+
+            foreach (int seqNo in _dirtyShader)
+            {
+                Debug.Log(string.Format("[ProceduralObjects] ChangeTracker is checking shader of seqNo {0}.", seqNo));
+            }
+
+            foreach (int seqNo in _objectsToRemove)
+            {
+                Debug.Log(string.Format("[ProceduralObjects] ChangeTracker is removing PO seqNo {0} from the QuadTree.", seqNo));
+
+                Quad quad = ProceduralObjectsLogic.instance.proceduralObjects[seqNo]?.ownerQuad;
+                quad?.RemoveObjectFromQuad(seqNo);
+                ProceduralObjectsLogic.instance.proceduralObjects[seqNo] = null;
+            }
+            _objectsToRemove.Clear();
         }
     }
 }
