@@ -94,6 +94,8 @@ namespace ProceduralObjects
         public SelectionFilters filters;
 
         public ShaderConversionController shaderConversionController;
+        
+        public int maxThreadCount;
 
         public int lastGCCount;
         public double cacheSortTime;
@@ -108,7 +110,7 @@ namespace ProceduralObjects
 
         private bool isGPUSupportInstancing = false;
         private Dictionary<string, Shader> loadedShaders = ProceduralUtils.LoadShader();
-        private int maxThreadCount;
+        private Plane[] frustum = new Plane[6];
         private int frameCount;
         private double poCalcTimeSum;
         private double poDrawMeshTimeSum;
@@ -427,7 +429,7 @@ namespace ProceduralObjects
 
             quadTree.DrawQuadBounds();
 
-            if (proceduralObjects != null) // && timeFromLastUpdate >= 20.0)
+            if (proceduralObjects != null)
             {
                 unbatchedPoSeqList.Clear();
                 foreach (KeyValuePair<int, int> kv in equivalentDictUsageTracker)
@@ -446,49 +448,23 @@ namespace ProceduralObjects
 
                 List<Quad> leafQuads = quadTree.GetLeafQuads();
                 List<Quad> visibleLeafQuads = new List<Quad>();
-                //StringBuilder sb = new StringBuilder().Append("[ProceduralObjects] Visible leaf Quads in QuadTree are: ");
-                Plane[] frustum = GeometryUtility.CalculateFrustumPlanes(renderCamera);
-                //List<int> viewportPoSeqList = new List<int>();
+                frustum = GeometryUtility.CalculateFrustumPlanes(renderCamera);
                 List<int> viewportPoSeqList = HelperPool.GetIntList();
                 foreach (Quad quad in leafQuads)
                 {
                     if (GeometryUtility.TestPlanesAABB(frustum, quad.bounds))
                     {
-                        //sb.Append($"Quad {quad.bounds.center}, ");
                         visibleLeafQuads.Add(quad);
                         viewportPoSeqList.AddRange(quad.allPoSeqList);
                     }
                 }
-                //Debug.Log(sb.ToString());
-
-                //HashSet<int> visibilitySet = HelperPool.GetVisibilitySet();
 
                 var sqrDynMinThreshold = ProceduralObjectsMod.DynamicRDMinThreshold.value * ProceduralObjectsMod.DynamicRDMinThreshold.value;
                 bool isNightTime = Singleton<SimulationManager>.instance.m_isNightTime;
                 Vector3 camPos = renderCamera.transform.position;
+                Matrix4x4 w2c = renderCamera.worldToCameraMatrix;
 
-                Parallel.For(0, viewportPoSeqList.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCount },
-                    () => HelperPool.GetIntList(),
-                    (i, loop, localList) =>
-                {
-                    int seqNo = viewportPoSeqList[i];
-                    var obj = proceduralObjects[seqNo];
-                    if (ProceduralUtils.TestPoInViewAndProcess(obj, renderCamera, camPos, sqrDynMinThreshold, isNightTime))
-                        localList.Add(seqNo);
-                    return localList;
-
-                }, localList =>
-                {
-                    lock (listLock)
-                    {
-                        //visibilitySet.UnionWith(localList);
-                        foreach (int seqNo in localList)
-                        {
-                            visibilityArray[seqNo] = true;
-                        }
-                    }
-                    HelperPool.ReturnIntList(localList);
-                });
+                ProceduralUtils.TestPoInViewAndProcessMultiThreadWrapper(viewportPoSeqList, w2c, camPos, sqrDynMinThreshold, isNightTime, visibilityArray);
 
                 Parallel.For(0, visibleLeafQuads.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCount }, 
                     () => new SortingLists(HelperPool.GetIntMeshPropDict(), HelperPool.GetIntList()),
@@ -504,7 +480,6 @@ namespace ProceduralObjects
                             localLists.localUnbatchedList.Add(seqNo);
                     }
 
-                    //ProceduralUtils.ProcessBatchablePoDict(localLists, current.batchOriginalPoIdDict, current.batchOriginalArrayDict, visibilitySet);
                     ProceduralUtils.ProcessBatchablePoDict(localLists, current.batchCustomPoIdDict, current.batchCustomArrayDict, visibilityArray);
 
                     //Debug.Log($"[ProceduralObjects] Quad {current.bounds.center} has {localLists.localUnbatchedList.Count} POs are unbatched, and has" +
@@ -793,9 +768,25 @@ namespace ProceduralObjects
                         bool layerVisible = m.parentObject.layer == null;
                         if (!layerVisible)
                             layerVisible = !m.parentObject.layer.m_isHidden;
-                        try { m.UpdateModule(this, simPaused, layerVisible); }
+                        Vector3 moduleParentOldPosition = m.parentObject.m_position;
+                        Quaternion moduleParentOldRotation = m.parentObject.m_rotation;
+                        try 
+                        { 
+                            m.UpdateModule(this, simPaused, layerVisible); 
+                            if (m.parentObject.m_position != moduleParentOldPosition)
+                            {
+                                m.parentObject.SetPosition(m.parentObject.m_position);
+                            }
+                            if (m.parentObject.m_rotation != moduleParentOldRotation)
+                            {
+                                m.parentObject.SetRotation(m.parentObject.m_rotation);
+                            }
+                        }
                         // Add a simple compare here for the position/rotation before and after UpdateModule(). Add to dirty sets if anything changed.
-                        catch (Exception e) { Debug.LogError("[ProceduralObjects] Error inside module UpdateModule() method!\n" + e); }
+                        catch (Exception e) 
+                        { 
+                            Debug.LogError("[ProceduralObjects] Error inside module UpdateModule() method!\n" + e); 
+                        }
                     }
                 }
             }
@@ -2438,6 +2429,12 @@ namespace ProceduralObjects
                     foreach (ProceduralObject obj in uiObj)
                     {
                         if (obj == null) continue; // Temp test.
+                        //if (obj.isRootOfGroup)
+                        //{
+                        //    Debug.Log(string.Format("[ProceduralObjects] For group root {0}, its _insideUIview value is {1}.", obj.id, obj._insideUIview.ToString()));
+                        //    Matrix4x4 w2c = renderCamera.worldToCameraMatrix;
+                        //    Debug.Log(string.Format("[ProceduralObjects] For group root {0}, its IsInFrontOfCamera result is {1}.", obj.id, ProceduralUtils.IsInFrontOfCamera(ref w2c, obj.m_position).ToString()));
+                        //} // This is test as well.
                         if (selectedGroup == null)
                         {
                             if (obj.group != null && !obj.isRootOfGroup)
@@ -3074,6 +3071,18 @@ namespace ProceduralObjects
             }
         }
 
+        void OnDestroy()
+        {
+            propertyBlock.Clear();
+            foreach (KeyValuePair<int, ComputeBuffer> kvp in equivalentArgsComputeBuffer)
+            {
+                kvp.Value?.Dispose();
+            }
+            foreach (KeyValuePair<int, ComputeBuffer> kvp in equivalentArgsComputeBuffer)
+            {
+                kvp.Value?.Dispose();
+            }
+        }
 
         public void DrawUIWindow(int id)
         {

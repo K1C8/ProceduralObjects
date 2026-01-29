@@ -586,8 +586,12 @@ namespace ProceduralObjects.Classes
         public int id, tilingFactor; 
         // mesh status : 0=undefined ; 1=equivalent to source; 2=custom (see m_mesh)
         public byte meshStatus;
-        public float renderDistance, m_scale, halfOverlayDiam, _squareDistToCam;
-        public bool isPloppableAsphalt, disableRecalculation, disableCastShadows, renderDistLocked, flipFaces, _insideRenderView, _insideUIview, _selected;
+        public float renderDistance, m_scale, halfOverlayDiam;
+        [Obsolete]
+        public float _squareDistToCam;
+        [Obsolete]
+        public bool _insideRenderView;
+        public bool isPloppableAsphalt, disableRecalculation, disableCastShadows, renderDistLocked, flipFaces, _insideUIview, _selected;
         public ProceduralObjectVisibility m_visibility;
         public NormalsRecalculation normalsRecalcMode;
         public Color m_color;

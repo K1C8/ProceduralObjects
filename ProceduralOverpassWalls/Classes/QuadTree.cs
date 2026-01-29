@@ -7,6 +7,7 @@ namespace ProceduralObjects.Classes
     {
         public Quad root;
         private readonly int maxLevel;
+        private List<Quad> leafQuads;
         public QuadTree(int _max) 
         {
             ProceduralObjectsLogic logic = ProceduralObjectsLogic.instance;
@@ -18,6 +19,8 @@ namespace ProceduralObjects.Classes
             maxLevel = _max;
             Bounds rootBounds = new Bounds(new Vector3(0f, 5000f, 0f), new Vector3(32000f, 10240f, 32000f));
             root = new Quad(0, _max, null, rootBounds, poIndices);
+
+            leafQuads = new List<Quad>();
         }
 
         public void DrawQuadBounds()
@@ -27,7 +30,8 @@ namespace ProceduralObjects.Classes
 
         public List<Quad> GetLeafQuads()
         {
-            return root.GetLeaves();
+            leafQuads.Clear();
+            return root.GetLeaves(ref leafQuads);
         }
 
     }
