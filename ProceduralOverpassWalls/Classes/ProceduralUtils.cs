@@ -862,74 +862,82 @@ namespace ProceduralObjects.Classes
             }
         }
 
-        public static bool TestPoInViewAndProcess(ProceduralObject obj, Camera cam, Vector3 camPos, float sqrDynMinThreshold, bool isNightTime)
+        public static bool TestPoInViewAndProcess(
+            ProceduralObject obj, Matrix4x4 worldToCamera, Vector3 camPos, float sqrDynMinThreshold, bool isNightTime, float globalMultiplier)
         {
             if (obj == null) return false;
             if ((obj.layer != null && obj.layer.m_isHidden) || !RenderOptions.instance.CanRenderSingle(obj, isNightTime))
                 return false;
 
             bool infiniteDist = obj.renderDistance >= 16001;
-            obj._squareDistToCam = (camPos - obj.m_position).sqrMagnitude;
+            float sqrRd = obj.renderDistance * obj.renderDistance * globalMultiplier * globalMultiplier;
+            float squareDistToCam = (camPos.x - obj.m_position.x) * (camPos.x - obj.m_position.x) + (camPos.y - obj.m_position.y) * (camPos.y - obj.m_position.y) + (camPos.z - obj.m_position.z) * (camPos.z - obj.m_position.z);
 
-            float sqrRd = obj.renderDistance * RenderOptions.instance.globalMultiplier;
-            sqrRd *= sqrRd;
-            obj._insideRenderView = infiniteDist || obj._squareDistToCam <= sqrRd;
-
-            if (!obj._insideRenderView)
+            if (!infiniteDist && squareDistToCam > sqrRd)
             {
                 obj._insideUIview = false;
                 return false;
             }
 
-            Vector3 screenPoint = cam.WorldToScreenPoint(obj.m_position);
-            if (screenPoint.z >= 0)
-                obj._insideUIview = infiniteDist || (obj._squareDistToCam <= Mathf.Max(sqrRd, sqrDynMinThreshold)); // * 0.7f, sqrDynMinThreshold));  // Why 0.7f multiplied to sqrRd? Seems all distances here are square distance.
+            if (IsInFrontOfCamera(ref worldToCamera, obj.m_position))
+                obj._insideUIview = infiniteDist || (squareDistToCam <= Mathf.Max(sqrRd, sqrDynMinThreshold));
             else
                 obj._insideUIview = false;
-
 
             return true;
         }
 
-        public static void TestPoInQuadAndProcess(List<int> quadPoSeqList, Camera cam, Vector3 camPos, float sqrDynMinThreshold, bool isNightTime, HashSet<int> VisibilitySet)
+        public static void TestPoInViewAndProcessMultiThreadWrapper(
+            List<int> viewPoSeqList, Matrix4x4 worldToCamera, Vector3 camPos, float sqrDynMinThreshold, bool isNightTime, bool[] visibilityArray)
         {
-            int viewportPoSeqListCount = quadPoSeqList.Count;
-            List<int> VisibilityList = HelperPool.GetIntList();
+            int viewPoSeqListCount = viewPoSeqList.Count;
+            int viewPoSeqListDefaultChunkSize = 500;
+            int defaultThreadCount = 
+                viewPoSeqListCount > viewPoSeqListDefaultChunkSize ? 
+                viewPoSeqListCount / viewPoSeqListDefaultChunkSize : 1;
+            int workerCount = Math.Min(ProceduralObjectsLogic.instance.maxThreadCount, defaultThreadCount);
+            int chunkSize = (int)Math.Ceiling((double)viewPoSeqListCount / workerCount);
+            float globalMultiplier = RenderOptions.instance.globalMultiplier;
 
-            for (int i = 0; i < viewportPoSeqListCount; i++)
+            Task[] tasks = new Task[workerCount];
+
+            for (int t = 0; t < workerCount; t++)
             {
-                int poSeq = quadPoSeqList[i];
-                var obj = instance.proceduralObjects[poSeq];
-
-                if (obj == null) continue;
-                if ((obj.layer != null && obj.layer.m_isHidden) || !RenderOptions.instance.CanRenderSingle(obj, isNightTime))
-                    continue;
-
-                bool infiniteDist = obj.renderDistance >= 16001;
-                obj._squareDistToCam = (camPos - obj.m_position).sqrMagnitude;
-
-                float sqrRd = obj.renderDistance * RenderOptions.instance.globalMultiplier;
-                sqrRd *= sqrRd;
-                obj._insideRenderView = infiniteDist || obj._squareDistToCam <= sqrRd;
-
-                if (!obj._insideRenderView)
+                int start = t * chunkSize;
+                int end = Math.Min(start + chunkSize, viewPoSeqListCount);
+                tasks[t] = Task.Factory.StartNew(() =>
                 {
-                    obj._insideUIview = false;
-                    continue;
-                }
+                    for (int i = start; i < end; i++)
+                    {
+                        int seqNo = viewPoSeqList[i];
+                        ProceduralObject obj = instance.proceduralObjects[seqNo];
+                        if (obj == null)
+                        {
+                            continue;
+                        }
+                        if (TestPoInViewAndProcess(obj, worldToCamera, camPos, sqrDynMinThreshold, isNightTime, globalMultiplier))
+                        {
+                            visibilityArray[seqNo] = true;
+                        }
+                    }
+                }, TaskCreationOptions.None);
 
-                Vector3 screenPoint = cam.WorldToScreenPoint(obj.m_position);
-                if (screenPoint.z >= 0)
-                    obj._insideUIview = infiniteDist || (obj._squareDistToCam <= Mathf.Max(sqrRd, sqrDynMinThreshold));
-                else
-                    obj._insideUIview = false;
-
-                VisibilityList.Add(poSeq);
             }
-            VisibilitySet.UnionWith(VisibilityList);
-            HelperPool.ReturnIntList(VisibilityList);
+            Task.WaitAll(tasks);
         }
 
+        public static bool IsInFrontOfCamera(ref Matrix4x4 w2c, Vector3 worldPos)
+        {
+            // camera-space z = dot(row2, (x,y,z,1))
+            // or z = w2c.MultiplyPoint(worldPos).z; // z < 0 when obj is in front of the camera frustrum
+            float z =
+                w2c.m20 * worldPos.x +
+                w2c.m21 * worldPos.y +
+                w2c.m22 * worldPos.z +
+                w2c.m23;
+
+            return z < 0f;
+        }
 
         public static void ProcessBatchablePoDict(
             SortingLists sortingList, Dictionary<string, List<int>> seqDict, Dictionary<string, List<MeshProperties>> meshPropertiesDict, 
@@ -948,14 +956,12 @@ namespace ProceduralObjects.Classes
                     //List<MeshProperties> list = sortingList.localBatchDict[headSeq];
                     //equivalentMtlDict.GetOrAdd(head.m_mesh, head.m_material);
 
+                    List<int> valueList = kv.Value;
+                    int batchSize = valueList.Count;
                     List<MeshProperties> quadBatchDictMeshPropertiesList = meshPropertiesDict[kv.Key];
-                    for (int j = 0; j < kv.Value.Count; j++)
+                    for (int j = 0; j < batchSize; j++)
                     {
-                        int seqNo = kv.Value[j];
-                        //var obj = instance.proceduralObjects[seqNo];
-
-                        //if (visibleSet.Contains(seqNo))
-                        if (visibilityArray[seqNo])
+                        if (visibilityArray[valueList[j]])
                             frameCacheDictList.Add(quadBatchDictMeshPropertiesList[j]);
                     }
                     //list.AddRange(propsDict[key]);

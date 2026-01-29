@@ -200,19 +200,20 @@ namespace ProceduralObjects.Classes
             return children;
         }
 
-        public List<Quad> GetLeaves()
+        public List<Quad> GetLeaves(ref List<Quad> inList)
         {
-            List<Quad> result = new List<Quad>();
+            //List<Quad> result = new List<Quad>();
             if (children != null)
             {
                 for (int i = 0; i < children.Length; i++)
-                    result.AddRange(children[i].GetLeaves());
+                    children[i].GetLeaves(ref inList);
             }
             else
             {
-                return new List<Quad>() { this };
+                inList.Add(this);
+                return inList;
             }
-            return result;
+            return inList;
         }
 
         // For debug use to visualize quad tree blocks
