@@ -228,6 +228,7 @@ namespace ProceduralObjects.Classes
                 return null;
             foreach (ProceduralObject obj in logic.proceduralObjects)
             {
+                if (obj == null) continue;
                 list.Add(new ProceduralObjectContainer(obj));
             }
             try
@@ -314,6 +315,7 @@ namespace ProceduralObjects.Classes
                             obj.m_mesh.uv = Vertex.RecalculateUVMap(obj, Vertex.CreateVertexList(obj));
                     }
                     obj.RecalculateBoundsNormalsExtras(obj.meshStatus);
+                    // Adding objects during game loading, AddObjectToQuadTree() not required
                     logic.proceduralObjects.Add(obj);
                     logic.activeIds.Add(obj.id);
                 }
@@ -614,6 +616,8 @@ namespace ProceduralObjects.Classes
                         sub.m_position = VertexUtils.RotatePointAroundPivot(subB.m_position + obj.m_position, obj.m_position, obj.m_rotation);
                         pos.Add(sub);
                         logic.proceduralObjects.Add(sub);
+                        // Object created during gameplay, need to add to quad tree explicitly.
+                        ChangeTracker.AddObjectToQuadTree(logic.proceduralObjects.GetSeqNoWithId(sub.id));
                     }
                     catch
                     {
@@ -953,8 +957,6 @@ namespace ProceduralObjects.Classes
                         sortingList.localBatchDict[headSeq] = HelperPool.GetMeshPropsList();
                         frameCacheDictList = sortingList.localBatchDict[headSeq];
                     }
-                    //List<MeshProperties> list = sortingList.localBatchDict[headSeq];
-                    //equivalentMtlDict.GetOrAdd(head.m_mesh, head.m_material);
 
                     List<int> valueList = kv.Value;
                     int batchSize = valueList.Count;

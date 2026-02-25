@@ -81,6 +81,7 @@ namespace ProceduralObjects.SelectionMode
                                 }
                                 obj.m_rotation = selection[i].m_rotation;
                                 logic.proceduralObjects.Add(obj);
+                                ChangeTracker.AddObjectToQuadTree(logic.proceduralObjects.GetSeqNoWithId(obj.id));
                             }
                             else if (logic.clipboard.type == ClipboardProceduralObjects.ClipboardType.Selection)
                             {
@@ -101,6 +102,7 @@ namespace ProceduralObjects.SelectionMode
                                         }
                                         obj.m_rotation = selection[i].m_rotation;
                                         logic.proceduralObjects.Add(obj);
+                                        ChangeTracker.AddObjectToQuadTree(logic.proceduralObjects.GetSeqNoWithId(obj.id));
                                     }
                                     else
                                     {
@@ -114,6 +116,7 @@ namespace ProceduralObjects.SelectionMode
                                         }
                                         obj.m_rotation = obj.m_rotation * qDiff;
                                         logic.proceduralObjects.Add(obj);
+                                        ChangeTracker.AddObjectToQuadTree(logic.proceduralObjects.GetSeqNoWithId(obj.id));
                                     }
                                 }
                                 logic.clipboard.RecreateGroups(cacheRealPairs);

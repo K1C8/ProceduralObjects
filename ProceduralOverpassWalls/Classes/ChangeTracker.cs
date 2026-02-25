@@ -17,6 +17,7 @@ namespace ProceduralObjects.Classes
         private readonly HashSet<int> _dirtyMaterial = new HashSet<int>();
         private readonly HashSet<int> _dirtyShader = new HashSet<int>();
         private readonly HashSet<int> _objectsToRemove = new HashSet<int>();
+        private readonly HashSet<int> _objectsToAdd = new HashSet<int>();
 
         private ChangeTracker() { }
 
@@ -57,6 +58,11 @@ namespace ProceduralObjects.Classes
         public static void RemoveObjectFromQuadTree(int seqNo)
         {
             Tracker._objectsToRemove.Add(seqNo);
+        }
+
+        public static void AddObjectToQuadTree(int seqNo)
+        {
+            Tracker._objectsToAdd.Add(seqNo);
         }
 
         public void Process()
@@ -116,6 +122,16 @@ namespace ProceduralObjects.Classes
                 ProceduralObjectsLogic.instance.proceduralObjects[seqNo] = null;
             }
             _objectsToRemove.Clear();
+
+            foreach (int seqNo in _objectsToAdd)
+            {
+                Debug.Log(string.Format("[ProceduralObjects] ChangeTracker is adding PO seqNo {0} to the QuadTree.", seqNo));
+                if (!ProceduralObjectsLogic.instance.QuadTree.AddObjectToQuadTree(seqNo))
+                {
+                    Debug.Log(string.Format("[ProceduralObjects] ChangeTracker encountered error when adding PO seqNo {0} to the QuadTree.", seqNo));
+                }
+            }
+            _objectsToAdd.Clear();
         }
     }
 }

@@ -17,7 +17,7 @@ namespace ProceduralObjects.Classes
             instance = this;
             this.logic = logic;
             RefreshCounters();
-            window = new Rect(555, 200, 300, 235);
+            window = new Rect(555, 200, 300, 335);
         }
 
         public static POStatisticsManager instance;
@@ -30,12 +30,18 @@ namespace ProceduralObjects.Classes
         public void DrawWindow()
         {
             if (showWindow)
+            {
                 window = GUIUtils.ClampRectToScreen(GUIUtils.Window(99308274, window, draw, LocalizationManager.instance.current["stats"]));
+            }
         }
         private void draw(int id)
         {
             if (GUIUtils.CloseHelpButtons(window, "Statistics"))
+            {
                 showWindow = false;
+                // Hide Quad bounds once window is closed.
+                logic.QuadTree.HideQuadBounds();
+            }
             if (GUI.Button(new Rect(222, 3, 23, 22), ProceduralObjectsMod.Icons[5]))
             {
                 ProceduralObjectsLogic.PlaySound();
@@ -48,10 +54,24 @@ namespace ProceduralObjects.Classes
                 + "\n    " + LocalizationManager.instance.current["stats_convProps_pAsph"]
                 + "\n" + LocalizationManager.instance.current["stats_convBuildings"]
                 + "\n\n" + LocalizationManager.instance.current["stats_layers"]);
+            GUI.Label(new Rect(5, 240, 290, 20), LocalizationManager.instance.current["stats_lastPORenderTime"]);
+            GUI.Label(new Rect(5, 256, 290, 20), LocalizationManager.instance.current["stats_lastPOUpdateTime"]);
+            GUI.Label(new Rect(5, 272, 290, 20), LocalizationManager.instance.current["stats_lastFrameTime"]);
+
             GUI.skin.label.alignment = TextAnchor.UpperRight;
-            try { GUI.Label(new Rect(5, 27, 290, 200), counter_POs + "\n" + logic.groups.Count + "\n" + counter_customModels + "\n" + logic.failedToLoadObjects + "\n"  + logic.loadingTime + " s\n\n" + counter_ConvProps + "\n" + counter_Decals + "\n" + counter_PSrfs + "\n" + counter_PA + "\n" + counter_ConvBuildings + "\n\n" + counter_layers); }
+            try 
+            { 
+                GUI.Label(new Rect(5, 27, 290, 200), counter_POs + "\n" + logic.groups.Count + "\n" + counter_customModels + "\n" + logic.failedToLoadObjects + "\n"  + logic.loadingTime + " s\n\n" + counter_ConvProps + "\n" + counter_Decals + "\n" + counter_PSrfs + "\n" + counter_PA + "\n" + counter_ConvBuildings + "\n\n" + counter_layers);
+                GUI.Label(new Rect(5, 240, 290, 20), logic.totalBatchRenderPipelineTime.ToString());
+                GUI.Label(new Rect(5, 256, 290, 20), logic.totalUpdateTime.ToString());
+                GUI.Label(new Rect(5, 272, 290, 20), logic.lastFrameTime.ToString());
+            }
             catch { }
+
             GUI.skin.label.alignment = TextAnchor.UpperLeft;
+
+            // Quad display code
+            logic.QuadTree.DrawQuadBounds();
         }
 
         public void SetPosition(float x, float y)
@@ -72,6 +92,8 @@ namespace ProceduralObjects.Classes
             for (int i = 0; i < counter_POs; i++)
             {
                 var po = logic.proceduralObjects[i];
+                if (po == null) 
+                    continue;
                 if (po.baseInfoType == "PROP")
                 {
                     counter_ConvProps += 1;

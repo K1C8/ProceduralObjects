@@ -237,6 +237,22 @@ namespace ProceduralObjects.Classes
             }
         }
 
+        public void HideQuadBounds()
+        {
+            if (children == null)
+            {
+                if (lineObject != null && lineObject.activeSelf)
+                {
+                    lineObject.SetActive(false);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < children.Length; i++)
+                    children[i].HideQuadBounds();
+            }
+        }
+
         public string GetObjHashString(ProceduralObject obj, SHA1 sha1)
         {
             StringBuilder sb = new StringBuilder(obj._baseProp.name);
@@ -335,8 +351,12 @@ namespace ProceduralObjects.Classes
                 string poMeshIdentifierString = poSeqBatchHandleDict[seqNo].identifierString;
                 RemoveObjectFromQuad(seqNo);
                 Quad newQuadToJoin = LocateQuadLeafFromPosition(obj.m_position);
+                if (newQuadToJoin == null)
+                {
+                    Debug.Log(string.Format("[ProceduralObjects] Failed to locate new quad for obj {0} now located at {1}", seqNo, obj.m_position));
+                    return;
+                }
                 newQuadToJoin.TakeInNewPo(seqNo, poMeshIdentifierString);
-                obj.ownerQuad = newQuadToJoin;
             }
         }
 
@@ -425,6 +445,7 @@ namespace ProceduralObjects.Classes
         {
             BatchHandle handle = poSeqBatchHandleDict[seqNo];
             allPoSeqSet.Remove(seqNo);
+            // Problematic way to handle this... 
             RemoveFromPreviousBatchingList(seqNo, handle);
             poSeqBatchHandleDict.Remove(seqNo);
             int seqNoIndexInAllPoSeqList = allPoSeqList.IndexOf(seqNo);
@@ -441,6 +462,20 @@ namespace ProceduralObjects.Classes
             allPoSeqSet.Add(seqNo);
             ProceduralObject obj = ProceduralObjectsLogic.instance.proceduralObjects[seqNo];
             poSeqBatchHandleDict.Add(seqNo, AddToNewBatchingList(seqNo, objHashStr, null));
+            obj.ownerQuad = this;
+        }
+
+        public bool TakeInPoAfterCreated(int seqNo)
+        {
+            ProceduralObject obj = ProceduralObjectsLogic.instance.proceduralObjects[seqNo];
+            Quad newQuadToJoin = LocateQuadLeafFromPosition(obj.m_position);
+            if (newQuadToJoin == null)
+            {
+                Debug.Log(string.Format("[ProceduralObjects] Failed to locate new quad for obj {0} now located at {1}", seqNo, obj.m_position));
+                return false;
+            }
+            newQuadToJoin.TakeInNewPo(seqNo, GetObjHashString(obj, HelperPool.GetSHA1Instance()));
+            return true;
         }
 
         private Quad LocateQuadLeafFromPosition(Vector3 position)
@@ -449,6 +484,7 @@ namespace ProceduralObjects.Classes
             while (!quad.bounds.Contains(position) && quad.parent != null)
             {
                 quad = quad.parent;
+                Debug.Log(string.Format("[ProceduralObjects] Escalating request of LocateQuadLeafFromPosition(Vector3 {0}) to parent quad {1}.", position, quad.bounds.center));
             }
             if (!quad.bounds.Contains(position) && quad.parent == null)
             {
@@ -463,6 +499,7 @@ namespace ProceduralObjects.Classes
                         if (child.bounds.Contains(position))
                         {
                             quad = child;
+                            Debug.Log(string.Format("[ProceduralObjects] Refining request of LocateQuadLeafFromPosition(Vector3 {0}) to child quad {1}.", position, quad.bounds.center));
                             break;
                         }
                     }
@@ -493,16 +530,34 @@ namespace ProceduralObjects.Classes
             return true;
         }
 
+        // Need to handle BatchHandles that swaped ahead and have their indexInList updated to the new index in the unbatchable/batched lists.
         private void RemoveFromPreviousBatchingList(int seqNo, BatchHandle handle)
         {
+            int indexToRemove = handle.indexInList;
             if (handle.identifierString == null && handle.objectStatus == ObjectStatus.Unbatched)
             {
+                // If the object to remove from list is not the last item, then it means another item (the previous last item in list) is required to be swapped ahead
+                // to have the RemoveAtSwapBack to work.
+                if (indexToRemove < unbatchableList.Count - 1 && 0 < indexToRemove)
+                {
+                    int seqNoLastItemUnbatchable = unbatchableList[unbatchableList.Count - 1];
+                    BatchHandle handleLastItem = poSeqBatchHandleDict[seqNoLastItemUnbatchable];
+                    handleLastItem.indexInList = indexToRemove;
+                }
                 unbatchableList.RemoveAtSwapBack(handle.indexInList);
             }
             else
             {
                 List<int> objPrevBatchPoSeqList = ResolveIntListByPoSeq(seqNo);
                 List<MeshProperties> objPrevBatchMeshPropertiesList = ResolveMeshPropertiesListByPoSeq(seqNo);
+                // If the object to remove from list is not the last item, then it means another item (the previous last item in list) is required to be swapped ahead
+                // to have the RemoveAtSwapBack to work.
+                if (indexToRemove < objPrevBatchPoSeqList.Count - 1 && 0 < indexToRemove)
+                {
+                    int seqNoLastItemUnbatchable = objPrevBatchPoSeqList[objPrevBatchPoSeqList.Count - 1];
+                    BatchHandle handleLastItem = poSeqBatchHandleDict[seqNoLastItemUnbatchable];
+                    handleLastItem.indexInList = indexToRemove;
+                }
                 objPrevBatchPoSeqList?.RemoveAtSwapBack(handle.indexInList);
                 objPrevBatchMeshPropertiesList?.RemoveAtSwapBack(handle.indexInList);
             }
@@ -513,6 +568,11 @@ namespace ProceduralObjects.Classes
             if (handle == null)
                 handle = new BatchHandle(null, unbatchableList.Count, ObjectStatus.Unbatched);
             ProceduralObject obj = ProceduralObjectsLogic.instance.proceduralObjects[seqNo];
+            if (obj == null)
+            {
+                Debug.Log(string.Format("[ProceduralObjects] ProceduralObjectsLogic.instance.proceduralObjects[{0}] is null!", seqNo));
+                return handle;
+            }
             ShaderConversionController conversionController = ProceduralObjectsLogic.instance.shaderConversionController;
             if (objHashStr != null && batchCustomPoIdDict.ContainsKey(objHashStr) && 
                 batchCustomArrayDict.ContainsKey(objHashStr) && IsPoAbleToBeBatched(obj))

@@ -97,11 +97,20 @@ namespace ProceduralObjects
         
         public int maxThreadCount;
 
+        // Debug and profiling.
         public int lastGCCount;
         public double cacheSortTime;
         public double totalBatchingTime;
+        public double totalBatchRenderPipelineTime;
+        public double totalUpdateTime;
         public int totalBatchCount;
         public int totalBatchedPoCount;
+        public double lastFrameTime;
+        private int frameCount;
+        private double poCalcTimeSum;
+        private double poDrawMeshTimeSum;
+        private double poUpdateTimeSum;
+        private DateTime lastUpdateFinishDateTime;
 
         public bool showLayerSetScroll = false, showMoreTools = false;
         private Vector2 scrollLayerSet = Vector2.zero;
@@ -111,11 +120,7 @@ namespace ProceduralObjects
         private bool isGPUSupportInstancing = false;
         private Dictionary<string, Shader> loadedShaders = ProceduralUtils.LoadShader();
         private Plane[] frustum = new Plane[6];
-        private int frameCount;
-        private double poCalcTimeSum;
-        private double poDrawMeshTimeSum;
-        private double poUpdateTimeSum;
-        private DateTime lastRenderTime;
+
         private readonly ConcurrentDictionary<int, MeshProperties[]> equivalentDict
              = new ConcurrentDictionary<int, MeshProperties[]>();
         private readonly ConcurrentDictionary<int, int> equivalentDictUsageTracker
@@ -140,6 +145,7 @@ namespace ProceduralObjects
         //private ComputeBuffer[] argsBufferArray;
         //private ComputeBuffer meshPropertiesBuffer;
         //private uint[] args;
+        public QuadTree QuadTree { get { return quadTree; } }
 
         private static Dictionary<int, int> _poIdToSeqNoCache = new Dictionary<int, int>();
 
@@ -329,11 +335,12 @@ namespace ProceduralObjects
                 unbatchedPoSeqs.Clear();
             }
 
-            lastRenderTime = DateTime.Now;
+            lastUpdateFinishDateTime = DateTime.Now;
 
             loadingTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
             Debug.Log("[ProceduralObjects] Game start procedure updated " + updateCount + " procedural objects with test shader.");
             Debug.Log("[ProceduralObjects] Game start procedure ended in " + loadingTime + " seconds");
+            
         }
 
         void Update()
@@ -385,12 +392,13 @@ namespace ProceduralObjects
                             if (req.propInfo.m_mesh.name == "ploppableasphalt-prop" || req.propInfo.m_mesh.name == "ploppableasphalt-decal")
                                 c = ProceduralUtils.GetPloppableAsphaltCfg();
                         }
-                        // Consider adding an event for object creation during gameplay
                         po.m_position = req.position;
                         po.m_rotation = req.rotation;
                         po.m_color = c;
                         po.m_material.color = c;
                         proceduralObjects.Add(po);
+                        // Consider adding an event for object creation during gameplay
+                        ChangeTracker.AddObjectToQuadTree(proceduralObjects.GetSeqNoWithId(po.id));
                         req.converted = po;
                     }
                     catch
@@ -425,9 +433,9 @@ namespace ProceduralObjects
 
             frameCount++;
             var startTime = DateTime.Now;
-            var timeFromLastUpdate = Math.Round((DateTime.Now - lastRenderTime).TotalMilliseconds, 2);
+            var timeFromLastUpdate = Math.Round((DateTime.Now - lastUpdateFinishDateTime).TotalMilliseconds, 2);
 
-            quadTree.DrawQuadBounds();
+            //quadTree.DrawQuadBounds();
 
             if (proceduralObjects != null)
             {
@@ -588,9 +596,8 @@ namespace ProceduralObjects
                 //HelperPool.ReturnVisibilitySet(visibilitySet);
                 leafQuads.Clear();
 
-                lastRenderTime = DateTime.Now;
-                cacheSortTime = Math.Round((DateTime.Now - sortStartTime).TotalMilliseconds, 2);
-                totalBatchingTime = Math.Round((DateTime.Now - startTime).TotalMilliseconds, 2);
+                cacheSortTime = Math.Round((double)(DateTime.Now - sortStartTime).Ticks / 10000, 2);
+                totalBatchingTime = Math.Round((double)(DateTime.Now - startTime).Ticks / 10000, 2);
                 int gcCount = GC.CollectionCount(0);
 
                 if (gcCount != lastGCCount)
@@ -720,8 +727,9 @@ namespace ProceduralObjects
 
                     foreach (var index in unbatchedPoSeqList)
                     {
-                        Graphics.DrawMesh(proceduralObjects[index].m_mesh, proceduralObjects[index].m_position, proceduralObjects[index].m_rotation,
-                            proceduralObjects[index].m_material, 0, null, 0, null, !proceduralObjects[index].disableCastShadows, true);
+                        ProceduralObject obj = proceduralObjects[index];
+                        Graphics.DrawMesh(obj.m_mesh, obj.m_position, obj.m_rotation,
+                            obj.m_material, 0, null, 0, null, !obj.disableCastShadows, true);
                     }
 
                     // If the user is hovering on single ungroupped object, or single object in a group when a group is selected, overlay it with purple.
@@ -752,6 +760,7 @@ namespace ProceduralObjects
                 }
 
                 var poDrawMeshTime = Math.Round((DateTime.Now - startTime).TotalMilliseconds, 2) - poCalcTime;
+                totalBatchRenderPipelineTime = Math.Round((double)(DateTime.Now - startTime).Ticks / 10000, 2);
                 poDrawMeshTimeSum += poDrawMeshTime;
 
                 Debug.Log(string.Format("[ProceduralObjects] Batching process consumed {0} ms, sorting equivalentDictCache consumed {1} ms to complete. {2} POs rendered batched in {3} batches, {4} POs rendered individually this frame.",
@@ -780,6 +789,16 @@ namespace ProceduralObjects
                             if (m.parentObject.m_rotation != moduleParentOldRotation)
                             {
                                 m.parentObject.SetRotation(m.parentObject.m_rotation);
+                            }
+                            if (m.parentObject.isRootOfGroup && (m.parentObject.m_position != moduleParentOldPosition || m.parentObject.m_rotation != moduleParentOldRotation))
+                            {
+                                foreach (ProceduralObject child in m.parentObject.group.objects)
+                                {
+                                    if (!child.isRootOfGroup)
+                                    {
+                                        ChangeTracker.MarkMeshPropertiesDirty(proceduralObjects.GetSeqNoWithId(child.id));
+                                    }
+                                }
                             }
                         }
                         // Add a simple compare here for the position/rotation before and after UpdateModule(). Add to dirty sets if anything changed.
@@ -1056,10 +1075,10 @@ namespace ProceduralObjects
                             foreach (var kvp in moveToSelection)
                             {
                                 // Need changes here. Should use the SetPosition() and SetRotation()
-                                // kvp.Key.SetPosition(kvp.Value.position);
-                                // kvp.Key.SetRotation(kvp.Value.rotation);
-                                kvp.Key.m_position = kvp.Value.position;
-                                kvp.Key.m_rotation = kvp.Value.rotation;
+                                kvp.Key.SetPosition(kvp.Value.position);
+                                kvp.Key.SetRotation(kvp.Value.rotation);
+                                //kvp.Key.m_position = kvp.Value.position;
+                                //kvp.Key.m_rotation = kvp.Value.rotation;
                             }
                         }
                     }
@@ -1079,8 +1098,8 @@ namespace ProceduralObjects
                                 {
                                     currentlyEditingObject.historyEditionBuffer.axisUsed = axisState;
                                     var obj = CloneObject(currentlyEditingObject);
-                                    // Consider adding an event for object creation and insert it to the Quad during gameplay
-                                    obj.m_position = currentlyEditingObject.historyEditionBuffer.prevTempPos;
+                                    //obj.m_position = currentlyEditingObject.historyEditionBuffer.prevTempPos;
+                                    obj.SetPosition(currentlyEditingObject.historyEditionBuffer.prevTempPos);
                                     if (selectedGroup != null)
                                         selectedGroup.AddToGroup(obj);
 
@@ -1098,7 +1117,8 @@ namespace ProceduralObjects
                                             for (int i = 1; i < draw; i++)
                                             {
                                                 var lineobj = CloneObject(currentlyEditingObject);
-                                                lineobj.m_position = drawpos;
+                                                //lineobj.m_position = drawpos;
+                                                lineobj.SetPosition(drawpos);
                                                 // Consider adding an event for updating Quad after object cloning
                                                 drawpos += Gizmos.posDiffSaved;
                                                 if (selectedGroup != null)
@@ -1356,7 +1376,8 @@ namespace ProceduralObjects
                                                         drawpos += Gizmos.posDiffSaved;
                                                     }
                                                     // Should change to currentlyEditingObject.SetPosition(drawpos)
-                                                    currentlyEditingObject.m_position = drawpos;
+                                                    //currentlyEditingObject.m_position = drawpos;
+                                                    currentlyEditingObject.SetPosition(drawpos);
                                                 }
                                                 Gizmos.DetectRotationKeyboard();
                                             }
@@ -2380,7 +2401,10 @@ namespace ProceduralObjects
             ChangeTracker.Tracker.Process();
 
             // Performance metrics
-            poUpdateTimeSum += Math.Round((DateTime.Now - updateStart).TotalMilliseconds, 2);
+            totalUpdateTime = Math.Round((double)(DateTime.Now - updateStart).Ticks / 10000, 2);
+            poUpdateTimeSum += totalUpdateTime;
+            lastFrameTime = Math.Round((double)(DateTime.Now - lastUpdateFinishDateTime).Ticks / 10000, 2);
+            lastUpdateFinishDateTime = DateTime.Now;
 
             if (frameCount == 1000)
             {
@@ -3639,8 +3663,9 @@ namespace ProceduralObjects
                                         if (external.m_externalType == ClipboardProceduralObjects.ClipboardType.Single)
                                         {
                                             var obj = PlaceCacheObject(external.m_object, false);
-                                            // Consider adding an event for object creation and insert it to the Quad during gameplay
-                                            obj.m_position = external.m_object._staticPos;
+                                            // Consider adding an event for object creation and insert it to the Quad during gameplay // Added inside PlaceCacheObject()
+                                            //obj.m_position = external.m_object._staticPos;
+                                            obj.SetPosition(external.m_object._staticPos);
                                             pObjSelection.Add(obj);
                                         }
                                         else if (external.m_externalType == ClipboardProceduralObjects.ClipboardType.Selection)
@@ -3649,7 +3674,8 @@ namespace ProceduralObjects
                                             foreach (var cache in external.m_selection.selection_objects.Keys.ToList())
                                             {
                                                 var obj = PlaceCacheObject(cache, false);
-                                                obj.m_position = cache._staticPos;
+                                                //obj.m_position = cache._staticPos;
+                                                obj.SetPosition(cache._staticPos);
                                                 pObjSelection.Add(obj);
                                                 created.Add(cache, obj);
                                             }
@@ -3715,6 +3741,7 @@ namespace ProceduralObjects
             else if (infoBase.infoType == "BUILDING")
                 v.ConstructObject(infoBase.buildingPrefab, proceduralObjects.GetNextUnusedId(), customTex);
             proceduralObjects.Add(v);
+            ChangeTracker.AddObjectToQuadTree(proceduralObjects.GetSeqNoWithId(v.id));
             SetCurrentlyEditingObj(v);
             return v;
         }
@@ -3724,6 +3751,7 @@ namespace ProceduralObjects
             ToolsModifierControl.mainToolbar.CloseEverything();
             var obj = new ProceduralObject(cacheObj, proceduralObjects.GetNextUnusedId(), ToolsModifierControl.cameraController.m_currentPosition + new Vector3(0, -8, 0), layerManager);
             proceduralObjects.Add(obj);
+            ChangeTracker.AddObjectToQuadTree(proceduralObjects.GetSeqNoWithId(obj.id));
             if (setCurrentlyEditing)
             {
                 SetCurrentlyEditingObj(obj);
@@ -3768,14 +3796,17 @@ namespace ProceduralObjects
             CloneIntoObject(source, obj);
             proceduralObjects.Add(obj);
             // Consider adding an event for object creation during gameplay
+            ChangeTracker.AddObjectToQuadTree(proceduralObjects.GetSeqNoWithId(obj.id));
             return obj;
         }
         public void CloneIntoObject(ProceduralObject source, ProceduralObject destination)
         {
             // destination.id = proceduralObjects.GetNextUnusedId();
             destination.m_material = GameObject.Instantiate(source.m_material);
-            destination.m_position = source.m_position;
-            destination.m_rotation = source.m_rotation;
+            //destination.m_position = source.m_position;
+            destination.SetPosition(source.m_position);
+            //destination.m_rotation = source.m_rotation;
+            destination.SetRotation(source.m_rotation);
             destination.customTexture = source.customTexture;
             destination.layer = source.layer;
             destination.tilingFactor = source.tilingFactor;
@@ -4223,13 +4254,14 @@ namespace ProceduralObjects
                         {
                             obj = PlaceCacheObject(cache, false);
                             created.Add(cache, obj);
-                            obj.m_position = currentlyEditingObject.m_position + clipboard.selection_objects[cache];
+                            //obj.m_position = currentlyEditingObject.m_position + clipboard.selection_objects[cache];
+                            obj.SetPosition(currentlyEditingObject.m_position + clipboard.selection_objects[cache]);
                             obj.tempObj = new GameObject(obj.id.ToString());
                             obj.tempObj.transform.position = obj.m_position;
                             obj.tempObj.transform.rotation = obj.m_rotation;
                             obj.tempObj.transform.SetParent(currentlyEditingObject.tempObj.transform, true);
                         }
-                        // Consider adding an event for object creation and insert it to the Quad during gameplay
+                        // Consider adding an event for object creation and insert it to the Quad during gameplay // Added inside PlaceCacheObject()
                         moveToSelection.Add(obj, obj.tempObj.transform);
                         if (selectedGroup != null)
                             selectedGroup.AddToGroup(obj);
@@ -4278,6 +4310,9 @@ namespace ProceduralObjects
                     new EffectInfo.SpawnArea(currentlyEditingObject.m_position, Vector3.up, 10f), Vector3.zero, 0f, 1f, Singleton<AudioManager>.instance.DefaultGroup, 0u, true);
                 for (int i = 0; i < proceduralObjects.Count; i++)
                 {
+                    // Handle null objects due to change in object deletion logic.
+                    if (proceduralObjects[i] == null)
+                        continue;
                     proceduralObjects[i].historyEditionBuffer.ConfirmNewStep(currentlyEditingObject.vertices);
                     if (proceduralObjects[i] == currentlyEditingObject)
                         continue;
