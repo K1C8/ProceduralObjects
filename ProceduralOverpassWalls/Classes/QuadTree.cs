@@ -14,6 +14,10 @@ namespace ProceduralObjects.Classes
             List<int> poIndices = new List<int>();
             for (int i = 0; i < logic.proceduralObjects.Count; i++)
             {
+                if (logic.proceduralObjects[i] == null)
+                {
+                    continue;
+                }
                 poIndices.Add(i);
             }
             maxLevel = _max;
@@ -28,11 +32,20 @@ namespace ProceduralObjects.Classes
             root.DrawQuadBounds();
         }
 
+        public void HideQuadBounds()
+        {
+            root.HideQuadBounds();
+        }
+
         public List<Quad> GetLeafQuads()
         {
             leafQuads.Clear();
             return root.GetLeaves(ref leafQuads);
         }
 
+        public bool AddObjectToQuadTree(int seqNo)
+        {
+            return root.TakeInPoAfterCreated(seqNo);
+        }
     }
 }

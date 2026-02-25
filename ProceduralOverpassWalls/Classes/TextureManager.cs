@@ -335,6 +335,8 @@ namespace ProceduralObjects.Classes
             // SCAN POs, copy texture files to the saveDir, implement them in alreadyAddedFiles
             foreach (ProceduralObject obj in ProceduralObjectsLogic.instance.proceduralObjects)
             {
+                if (obj == null) 
+                    continue;
                 if (obj.customTexture == null)
                     continue;
                 if (!obj.customTexture.name.Contains("LOCALFOLDER/"))

@@ -132,6 +132,8 @@ namespace ProceduralObjects.Classes
         {
             foreach (var obj in ProceduralObjectsLogic.instance.proceduralObjects)
             {
+                if (obj == null) 
+                    continue;
                 if (obj.renderDistLocked)
                     continue;
 
