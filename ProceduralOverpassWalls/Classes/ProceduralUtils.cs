@@ -1,14 +1,18 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Xml;
-using System.Text;
-using UnityEngine;
-using ProceduralObjects.Tools;
-using System.IO;
-
-using ColossalFramework;
+﻿using ColossalFramework;
 using ColossalFramework.IO;
+using ProceduralObjects.Tools;
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Xml;
+using System.Xml.Linq;
+using UnityEngine;
+using static ProceduralObjects.ProceduralObjectsLogic;
 
 namespace ProceduralObjects.Classes
 {
@@ -28,12 +32,61 @@ namespace ProceduralObjects.Classes
         }
         public static ProceduralObject GetObjectWithId(this List<ProceduralObject> list, int id)
         {
-            if (list.Any(po => po.id == id))
+            // Original implementation
+            //if (list.Any(po => po.id == id))
+            //{
+            //    return list.FirstOrDefault(po => po.id == id);
+            //}
+            //return null;
+
+            // Check cache first
+            var logic = ProceduralObjectsLogic.instance;
+            //var cached = logic.GetCachedObjectById(id);
+            //if (cached != null)
+            //    return cached;
+
+            //// Fallback to slow search
+            //for (int i = 0; i < list.Count; i++)
+            //{
+            //    if (list[i].id == id)
+            //    {
+            //        // logic._groupRootCache[id] = list[i]; // store for future lookups
+            //        logic.AddObjectToCacheByListIndex(i);
+            //        return list[i];
+            //    }
+            //}
+            int cached = GetSeqNoWithId(list, id);
+            if (cached > -1)
             {
-                return list.FirstOrDefault(po => po.id == id);
+                ProceduralObject objectToReturn = logic.proceduralObjects[GetSeqNoWithId(list, id)];
+                return objectToReturn;
             }
             return null;
         }
+
+        public static int GetSeqNoWithId(this List<ProceduralObject> list, int id)
+        {
+            // Check cache first
+            var logic = ProceduralObjectsLogic.instance;
+            var cached = logic.GetCachedSeqNoById(id);
+            if (cached > -1 && list[cached] != null && list[cached].id == id)
+                return cached;
+
+            // Fallback to slow search
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i] == null) continue;
+                if (list[i].id == id)
+                {
+                    // logic._groupRootCache[id] = list[i]; // store for future lookups
+                    logic.AddObjectToCacheByListIndex(i);
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
         public static Vector2 WorldToGuiPoint(this Vector3 position)
         {
             var guiPosition = Camera.main.WorldToScreenPoint(position);
@@ -175,6 +228,7 @@ namespace ProceduralObjects.Classes
                 return null;
             foreach (ProceduralObject obj in logic.proceduralObjects)
             {
+                if (obj == null) continue;
                 list.Add(new ProceduralObjectContainer(obj));
             }
             try
@@ -197,6 +251,16 @@ namespace ProceduralObjects.Classes
             }
             return list.ToArray();
         }
+
+        public delegate Material getMaterialCallback(Material source);
+
+        public static Material GetMaterialUtil(Material source)
+        {
+            return new Material(source);
+        }
+
+
+
         public static void LoadContainerData(this ProceduralObjectsLogic logic, ProceduralObjectContainer[] containerArray)
         {
             logic.proceduralObjects = new List<ProceduralObject>();
@@ -210,17 +274,48 @@ namespace ProceduralObjects.Classes
             PropInfo[] props = Resources.FindObjectsOfTypeAll<PropInfo>();
             BuildingInfo[] buildings = Resources.FindObjectsOfTypeAll<BuildingInfo>();
 
+            Debug.Log(string.Format("[ProceduralObjects] LoadContainerData, PropInfo props' size is {0}, BuildingInfo buildings' size is {1}", props.Length, buildings.Length));
+
+            int propDefaultShaderCount = 0;
+            int propAnimUVShaderCount = 0;
+            int propDecalBlendShaderCount = 0;
+            int propRotorShaderCount = 0;
+
             foreach (var c in containerArray)
             {
                 try
                 {
                     var obj = new ProceduralObject(c, logic.layerManager, props, buildings);
+                    string baseName = obj._baseProp == null ? obj._baseBuilding.name : obj._baseProp.name;
+                    string shaderName = obj.m_material.shader == null ? "NO_SHADER_FOUND" : obj.m_material.shader.name;
+                    Debug.Log($"[ProceduralObjects] Loading data for proceduralObjects number {logic.proceduralObjects.Count}, from container.id: {c.id}. Container object name is: {baseName}, meshStatus: {c.meshStatus}; object material shader: {shaderName}");
+                    if (c.objectType == "PROP")
+                    {
+                        if (shaderName.Equals("Custom/Props/Prop/Default"))
+                        {
+                            propDefaultShaderCount++;
+                        }
+                        else if (shaderName.Equals("Custom/Props/Prop/AnimUV"))
+                        {
+                            propAnimUVShaderCount++;
+                        }
+                        else if (shaderName.Equals("Custom/Props/Decal/Blend"))
+                        {
+                            propDecalBlendShaderCount++;
+                        }
+                        else if (shaderName.Equals("Custom/Vehicles/Vehicle/Rotors"))
+                        {
+                            propRotorShaderCount++;
+                        }
+                    }
+
                     if (obj.meshStatus != 1)
                     {
                         if (obj.RequiresUVRecalculation && !obj.disableRecalculation)
                             obj.m_mesh.uv = Vertex.RecalculateUVMap(obj, Vertex.CreateVertexList(obj));
                     }
                     obj.RecalculateBoundsNormalsExtras(obj.meshStatus);
+                    // Adding objects during game loading, AddObjectToQuadTree() not required
                     logic.proceduralObjects.Add(obj);
                     logic.activeIds.Add(obj.id);
                 }
@@ -231,6 +326,96 @@ namespace ProceduralObjects.Classes
                     logic.failedToLoadObjects += 1;
                 }
             }
+
+            // Temporary test for multi-threaded loading, PopupStart.RegisterFailure is not modified to be thread-safe.
+
+            /*Material[] materials = new Material[containerArray.Length];
+
+
+            for (int i = 0; i < containerArray.Length; i++)
+            {
+                var c = containerArray[i];
+                Material currMat;
+                if (c.objectType == "PROP")
+                {
+                    PropInfo sourceProp = props.FirstOrDefault(info => info.name == c.basePrefabName);
+                    currMat = new Material(sourceProp.m_material);
+                }
+                else
+                {
+                    BuildingInfo sourceProp = buildings.FirstOrDefault(info => info.name == c.basePrefabName);
+                    currMat = new Material(sourceProp.m_material);
+                }
+                materials[i] = currMat;
+            }
+            Debug.Log("[ProceduralObjects] Material list materials has " + materials.Length + " records.");
+
+            ConcurrentDictionary<int, ProceduralObject> poDict = new ConcurrentDictionary<int, ProceduralObject>();
+            ConcurrentDictionary<ProceduralObjectContainer, Exception> errorDict = new ConcurrentDictionary<ProceduralObjectContainer, Exception>();
+
+            void PopulateFromContainers(int start, int end)
+            {
+                for (int i = start; i < end; i++)
+                {
+                    var c = containerArray[i];
+                    try
+                    {
+                        Debug.Log("[ProceduralObjects] Task " + Task.CurrentId + " processing container " + i + ", container.id: " + c.id);
+                        var obj = new ProceduralObject(c, logic.layerManager, props, buildings, materials[i]);
+                        if (obj.meshStatus != 1)
+                        {
+                            if (obj.RequiresUVRecalculation && !obj.disableRecalculation)
+                                obj.m_mesh.uv = Vertex.RecalculateUVMap(obj, Vertex.CreateVertexList(obj));
+                        }
+                        obj.RecalculateBoundsNormalsExtras(obj.meshStatus);
+                        //logic.proceduralObjects.Add(obj);
+                        //logic.activeIds.Add(obj.id);
+                        poDict.GetOrAdd(i, obj);
+                        Debug.Log("[ProceduralObjects] Task " + Task.CurrentId + " finished processing container " + i + ", container.id: " + c.id);
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogError("[ProceduralObjects] Failed to load a Procedural Object : \n" + e.GetType().ToString() + " : " + e.Message + "\n" + e.StackTrace + "\nObject loading order number: " + i + ", container.id: " + c.id + ", task number: " + Task.CurrentId);
+                        //PopupStart.RegisterFailure(c, e, props, buildings);
+                        errorDict.GetOrAdd(c, e);
+                        logic.failedToLoadObjects += 1;
+                    }
+                }
+            }
+
+            int stepSize = 1000;
+            List<Task> calcTasks = new List<Task>();
+
+            int partitionCount = (int)Math.Ceiling(containerArray.Length / (double)stepSize);
+            for (int i = 0; i < partitionCount; i++)
+            {
+                int start = i * stepSize;
+                int end = (i + 1) * stepSize < containerArray.Length ? (i + 1) * stepSize : containerArray.Length;
+                Task t = new Task(() =>
+                {
+                    PopulateFromContainers(start, end);
+                });
+                calcTasks.Add(t);
+                t.Start();
+            }
+
+            Task.WaitAll(calcTasks.ToArray());
+            for (int i = 0; i < containerArray.LongLength; i++)
+            {
+                if (poDict.TryGetValue(i, out ProceduralObject obj))
+                {
+                    logic.proceduralObjects.Add(obj);
+                    logic.activeIds.Add(obj.id);
+                }
+            }
+            foreach (var v in errorDict.ToList())
+            {
+                PopupStart.RegisterFailure(v.Key, v.Value, props, buildings);
+            }
+
+            */
+            // Test end
+            Debug.Log($"[ProceduralObjects] Data loaded from containers. Prop POs shader statistics: default shader object count at {propDefaultShaderCount}, AnimUV shader object count as {propAnimUVShaderCount}, decal shader object count at {propDecalBlendShaderCount}, rotor shader object count at {propRotorShaderCount}.");
             PopupStart.LoadingDoneShowPopup();
         }
         public static List<POGroup> BuildGroupsFromData(this ProceduralObjectsLogic logic)
@@ -370,6 +555,21 @@ namespace ProceduralObjects.Classes
             // return true if everything is equivalent
             return true;
         } 
+
+        public static bool CheckMeshEquivalance(Vector3[] thisVertices, Vector3[] otherVertices)
+        {
+            if (thisVertices == null || otherVertices == null) return false;
+
+            if (thisVertices.Length != otherVertices.Length) return false;
+
+            for (int i = 0;i < thisVertices.Length;i++)
+            {
+                if (thisVertices[i] != otherVertices[i]) return false;
+            }
+
+            return true;
+        }
+
         public static void ResetOriginalMesh(this ProceduralObject obj)
         {
             var originalVertices = (obj.baseInfoType == "PROP") ? obj._baseProp.m_mesh.vertices : obj._baseBuilding.m_mesh.vertices;
@@ -411,10 +611,13 @@ namespace ProceduralObjects.Classes
                         sub.ConstructObject(subB.m_buildingInfo, id);
                         float a = -(subB.m_angle * Mathf.Rad2Deg) % 360f;
                         if (a < 0) a += 360f;
+                        // May have to check the need of using subB.SetPosition and subB.SetRotation
                         sub.m_rotation = Quaternion.Euler(sub.m_rotation.eulerAngles.x, a, sub.m_rotation.eulerAngles.z) * obj.m_rotation;
                         sub.m_position = VertexUtils.RotatePointAroundPivot(subB.m_position + obj.m_position, obj.m_position, obj.m_rotation);
                         pos.Add(sub);
                         logic.proceduralObjects.Add(sub);
+                        // Object created during gameplay, need to add to quad tree explicitly.
+                        ChangeTracker.AddObjectToQuadTree(logic.proceduralObjects.GetSeqNoWithId(sub.id));
                     }
                     catch
                     {
@@ -604,6 +807,225 @@ namespace ProceduralObjects.Classes
                 tw.WriteLine("<tr><td>" + req.Value + "</td><td style=\"text-align:center;\"><input type=button onClick=\"parent.open('https://steamcommunity.com/sharedfiles/filedetails/?id="
                     + req.Key.ToString() + "')\" value='Show on the workshop'></td></tr>");
             tw.Close();
+        }
+
+        public static void InitMeshAndVertices(ProceduralObjectContainer container, string sourceMaterialName, Mesh sourceMesh, ProceduralObject target) 
+        {
+            if ((container.meshStatus == 0 || (container.meshStatus == 2 && !container.hasCustomTexture && container.textParam == null)) && container.vertices != null)
+            {
+                // CHECK FOR MESH REPETITION
+                if (CheckMeshEquivalence(container.vertices, sourceMesh.vertices))
+                {
+                    target.meshStatus = 1;
+                    target.m_mesh = sourceMesh;
+                    target.vertices = Vertex.CreateVertexList(sourceMesh.vertices, sourceMaterialName);
+                }
+                else
+                {
+                    target.meshStatus = 2;
+                    target.m_mesh = sourceMesh.InstantiateMesh();
+                    var vert = SerializableVector3.ToStandardVector3Array(container.vertices);
+                    if (container.scale != 0)
+                    {
+                        for (int i = 0; i < vert.Count(); i++)
+                        {
+                            vert[i] = new Vector3(vert[i].x * container.scale, vert[i].y * container.scale, vert[i].z * container.scale);
+                        }
+                    }
+                    target.m_mesh.SetVertices(new List<Vector3>(vert));
+                    target.vertices = Vertex.CreateVertexList(target);
+                }
+            }
+            else if (container.meshStatus == 1)
+            {
+                target.meshStatus = 1;
+                target.m_mesh = sourceMesh;
+                target.vertices = Vertex.CreateVertexList(sourceMesh.vertices, sourceMaterialName);
+            }
+            else // meshstatus2
+            {
+                target.meshStatus = 2;
+                target.m_mesh = sourceMesh.InstantiateMesh();
+                if (container.serializedMeshData != null)
+                    container.serializedMeshData.ApplyDataToObject(target);
+                else if (container.vertices != null)
+                {
+                    var vert = SerializableVector3.ToStandardVector3Array(container.vertices);
+                    if (container.scale != 0)
+                    {
+                        for (int i = 0; i < vert.Count(); i++)
+                        {
+                            vert[i] = new Vector3(vert[i].x * container.scale, vert[i].y * container.scale, vert[i].z * container.scale);
+                        }
+                    }
+                    target.m_mesh.SetVertices(new List<Vector3>(vert));
+                }
+                else
+                    throw new Exception("[ProceduralObjects] Loading failure : Missing mesh data !");
+                target.vertices = Vertex.CreateVertexList(target);
+            }
+        }
+
+        public static bool TestPoInViewAndProcess(
+            ProceduralObject obj, Matrix4x4 worldToCamera, Vector3 camPos, float sqrDynMinThreshold, bool isNightTime, float globalMultiplier)
+        {
+            if (obj == null) return false;
+            if ((obj.layer != null && obj.layer.m_isHidden) || !RenderOptions.instance.CanRenderSingle(obj, isNightTime))
+                return false;
+
+            bool infiniteDist = obj.renderDistance >= 16001;
+            float sqrRd = obj.renderDistance * obj.renderDistance * globalMultiplier * globalMultiplier;
+            float squareDistToCam = (camPos.x - obj.m_position.x) * (camPos.x - obj.m_position.x) + (camPos.y - obj.m_position.y) * (camPos.y - obj.m_position.y) + (camPos.z - obj.m_position.z) * (camPos.z - obj.m_position.z);
+
+            if (!infiniteDist && squareDistToCam > sqrRd)
+            {
+                obj._insideUIview = false;
+                return false;
+            }
+
+            if (IsInFrontOfCamera(ref worldToCamera, obj.m_position))
+                obj._insideUIview = infiniteDist || (squareDistToCam <= Mathf.Max(sqrRd, sqrDynMinThreshold));
+            else
+                obj._insideUIview = false;
+
+            return true;
+        }
+
+        public static void TestPoInViewAndProcessMultiThreadWrapper(
+            List<int> viewPoSeqList, Matrix4x4 worldToCamera, Vector3 camPos, float sqrDynMinThreshold, bool isNightTime, bool[] visibilityArray)
+        {
+            int viewPoSeqListCount = viewPoSeqList.Count;
+            int viewPoSeqListDefaultChunkSize = 500;
+            int defaultThreadCount = 
+                viewPoSeqListCount > viewPoSeqListDefaultChunkSize ? 
+                viewPoSeqListCount / viewPoSeqListDefaultChunkSize : 1;
+            int workerCount = Math.Min(ProceduralObjectsLogic.instance.maxThreadCount, defaultThreadCount);
+            int chunkSize = (int)Math.Ceiling((double)viewPoSeqListCount / workerCount);
+            float globalMultiplier = RenderOptions.instance.globalMultiplier;
+
+            Task[] tasks = new Task[workerCount];
+
+            for (int t = 0; t < workerCount; t++)
+            {
+                int start = t * chunkSize;
+                int end = Math.Min(start + chunkSize, viewPoSeqListCount);
+                tasks[t] = Task.Factory.StartNew(() =>
+                {
+                    for (int i = start; i < end; i++)
+                    {
+                        int seqNo = viewPoSeqList[i];
+                        ProceduralObject obj = instance.proceduralObjects[seqNo];
+                        if (obj == null)
+                        {
+                            continue;
+                        }
+                        if (TestPoInViewAndProcess(obj, worldToCamera, camPos, sqrDynMinThreshold, isNightTime, globalMultiplier))
+                        {
+                            visibilityArray[seqNo] = true;
+                        }
+                    }
+                }, TaskCreationOptions.None);
+
+            }
+            Task.WaitAll(tasks);
+        }
+
+        public static bool IsInFrontOfCamera(ref Matrix4x4 w2c, Vector3 worldPos)
+        {
+            // camera-space z = dot(row2, (x,y,z,1))
+            // or z = w2c.MultiplyPoint(worldPos).z; // z < 0 when obj is in front of the camera frustrum
+            float z =
+                w2c.m20 * worldPos.x +
+                w2c.m21 * worldPos.y +
+                w2c.m22 * worldPos.z +
+                w2c.m23;
+
+            return z < 0f;
+        }
+
+        public static void ProcessBatchablePoDict(
+            SortingLists sortingList, Dictionary<string, List<int>> seqDict, Dictionary<string, List<MeshProperties>> meshPropertiesDict, 
+            bool[] visibilityArray)
+        {
+            foreach (KeyValuePair<string, List<int>> kv in seqDict)
+            {
+                if (kv.Value.Count > 0)
+                {
+                    int headSeq = kv.Value[0];
+                    if (!sortingList.localBatchDict.TryGetValue(headSeq, out List<MeshProperties> frameCacheDictList))
+                    {
+                        sortingList.localBatchDict[headSeq] = HelperPool.GetMeshPropsList();
+                        frameCacheDictList = sortingList.localBatchDict[headSeq];
+                    }
+
+                    List<int> valueList = kv.Value;
+                    int batchSize = valueList.Count;
+                    List<MeshProperties> quadBatchDictMeshPropertiesList = meshPropertiesDict[kv.Key];
+                    for (int j = 0; j < batchSize; j++)
+                    {
+                        if (visibilityArray[valueList[j]])
+                            frameCacheDictList.Add(quadBatchDictMeshPropertiesList[j]);
+                    }
+                    //list.AddRange(propsDict[key]);
+                }
+                //else if (seqDict[key] != null && seqDict[key].Count > 0)
+                //{
+                //    for (int j = 0; j < seqDict[key].Count; j++)
+                //    {
+                //        int seqNo = seqDict[key][j];
+
+                //        if (set.Contains(seqNo))
+                //            sortingList.localUnbatchedList.Add(seqNo);
+                //    }
+                //    //sortingList.localUnbatchedList.AddRange(seqDict[key]);
+                //}
+            }
+        }
+
+        //public static string path = "/Assets/Bundles/ShaderPOTest.unity3d";
+
+        public static Dictionary<string, Shader> LoadShader()
+        {
+            Debug.Log("[ProceduralObjects] LoadShader() invoked.");
+
+
+            AssetBundle includedBundle = AssetBundle.LoadFromMemory(Properties.Resources.ShaderPOTest);
+            Dictionary<string, Shader> bundleLoader;
+
+            // From Klyte45's Write Everywhere code source, WriteEverywhere/WriteEverywhere.Assets/WEAssetLibrary.cs ReadShaders(AssetBundle bundle, out Dictionary<string, Shader> m_loadedShaders)
+            bundleLoader = new Dictionary<string, Shader>();
+            string[] bundleFiles = includedBundle.GetAllAssetNames();
+
+            foreach (string fileName in bundleFiles)
+            {
+                Debug.Log($"[ProceduralObjects] Reading file {fileName} inside the bundle {includedBundle}");
+                if (fileName.EndsWith(".shader"))
+                {
+                    Shader shader = includedBundle.LoadAsset<Shader>(fileName);
+                    string effectiveName = fileName.Split('.')[0].Split('/').Last();
+                    shader.name = $"Custom/ProceduralObject/Prop/{effectiveName}";
+                    bundleLoader[shader.name] = (shader);
+                }
+            }
+
+            foreach (var pair in bundleLoader)
+            {
+                Debug.Log(string.Format("[ProceduralObjects] LoadShader() loaded shader with effective name {0} within the included bundle.", pair.Key));
+            }
+
+            Debug.Log(string.Format("[ProceduralObjects] LoadShader() located {0} potential shaders. Unity running under mode {1}.", bundleLoader.Count, SystemInfo.graphicsDeviceType));
+
+            return bundleLoader;
+        }
+
+
+        public static void RemoveAtSwapBack<T> (this List<T> list, int index)
+        {
+            if (index < list.Count - 1)
+            {
+                list[index] = list[list.Count - 1];
+            }
+            list.RemoveAt(list.Count - 1);
         }
     }
 }

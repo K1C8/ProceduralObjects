@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using System.Linq;
 using System.Xml;
 using System.Text;
@@ -19,11 +20,12 @@ namespace ProceduralObjects.Classes
     public class ProceduralObject
     {
         public ProceduralObject() { }
-        public ProceduralObject(ProceduralObjectContainer container, LayerManager layerManager, PropInfo[] props, BuildingInfo[] buildings)
+        public ProceduralObject(ProceduralObjectContainer container, LayerManager layerManager, PropInfo[] props, BuildingInfo[] buildings) //, Material sourceMaterial) //, getMaterialCallback handle)
         {
             if (container.objectType == "PROP")
             {
-                PropInfo sourceProp = props.FirstOrDefault(info => info.name == container.basePrefabName);
+                //PropInfo sourceProp = props.FirstOrDefault(info => info.name.Equals(container.basePrefabName));
+                PropInfo sourceProp = PropInfoHelper.GetPropInfo(container.basePrefabName);
                 this._baseProp = sourceProp;
                 this.id = container.id;
                 this.basePrefabName = container.basePrefabName;
@@ -31,8 +33,17 @@ namespace ProceduralObjects.Classes
                 this.isPloppableAsphalt = sourceProp.IsPloppableAsphalt();
                 m_position = container.position.ToVector3();
                 m_rotation = container.rotation.ToQuaternion();
-                m_material = GameObject.Instantiate(sourceProp.m_material); // overkil ??
-                if (container.meshStatus == 0 && container.vertices != null)
+                // m_material = GameObject.Instantiate(sourceProp.m_material); // overkil ??
+
+                // Test version 241031 for draw mesh instancing tests
+                m_material = new Material(sourceProp.m_material); // Test version
+                //Debug.Log("[ProceduralObjects] Task " + Task.CurrentId + " loading data from container.id: " + container.id + ". Container object name is " + _baseProp.name + ", container meshStatus = " + container.meshStatus);
+                // m_material = sourceMaterial;  // Multithreaded version
+                m_material.enableInstancing = true;
+                ProceduralUtils.InitMeshAndVertices(container, sourceProp.m_material.name, sourceProp.m_mesh, this);
+                // Tests end
+
+                /*if (container.meshStatus == 0 && container.vertices != null)
                 {
                     // CHECK FOR MESH REPETITION
                     if (ProceduralUtils.CheckMeshEquivalence(container.vertices, sourceProp.m_mesh.vertices))
@@ -84,11 +95,14 @@ namespace ProceduralObjects.Classes
                     else
                         throw new Exception("[ProceduralObjects] Loading failure : Missing mesh data !");
                     vertices = Vertex.CreateVertexList(this);
-                }
+                }*/
+
+
                 if (sourceProp.m_mesh.name == "ploppableasphalt-prop" || sourceProp.m_mesh.name == "ploppableasphalt-decal")
                     m_color = m_material.ApplyPloppableColor();
                 if (container.hasCustomTexture && TextureManager.instance != null)
                 {
+                    Debug.Log("[ProceduralObjects] Task " + Task.CurrentId + " loading custom texture from containers test. Container object name is " + _baseProp.name);
                     var customTex = TextureManager.instance.FindTexture(container.customTextureName);
                     m_material.mainTexture = customTex as Texture;
                     customTexture = customTex;
@@ -96,7 +110,7 @@ namespace ProceduralObjects.Classes
             }
             else if (container.objectType == "BUILDING")// building
             {
-                BuildingInfo sourceProp = buildings.FirstOrDefault(info => info.name == container.basePrefabName);
+                BuildingInfo sourceProp = buildings.FirstOrDefault(info => info.name.Equals(container.basePrefabName));
                 this._baseBuilding = sourceProp;
                 this.id = container.id;
                 this.basePrefabName = container.basePrefabName;
@@ -104,8 +118,21 @@ namespace ProceduralObjects.Classes
                 this.isPloppableAsphalt = false;
                 m_position = container.position.ToVector3();
                 m_rotation = container.rotation.ToQuaternion();
+                // m_material = GameObject.Instantiate(sourceProp.m_material); // overkill ??
+
+                // Test version 241031
+                m_material = new Material(sourceProp.m_material); // Test version
+                Debug.Log("[ProceduralObjects] Task " + Task.CurrentId + " loading data from container.id: " + container.id + ". Container object name is " + _baseBuilding.name + ", container meshStatus = " + container.meshStatus);
+                // m_material = sourceMaterial; // Multithreaded version
+                m_material.enableInstancing = true;  // Test version
+
+                ProceduralUtils.InitMeshAndVertices(container, sourceProp.m_material.name, sourceProp.m_mesh, this);
+
+                // Tests end
+
+                /*
                 meshStatus = 2;
-                m_material = GameObject.Instantiate(sourceProp.m_material); // overkill ??
+
                 m_mesh = sourceProp.m_mesh.InstantiateMesh();
                 if (container.serializedMeshData != null)
                     container.serializedMeshData.ApplyDataToObject(this);
@@ -123,12 +150,14 @@ namespace ProceduralObjects.Classes
                 }
                 else
                     throw new Exception("[ProceduralObjects] Loading failure : Missing mesh data !");
-                vertices = Vertex.CreateVertexList(this);
+                vertices = Vertex.CreateVertexList(this); */
+
                 m_mesh.colors = new Color[] { };
                 m_mesh.colors32 = new Color32[] { };
 
                 if (container.hasCustomTexture && TextureManager.instance != null)
                 {
+                    Debug.Log("[ProceduralObjects] Task " + Task.CurrentId + " loading custom texture from containers test. Container object name is " + _baseBuilding.name);
                     var customTex = TextureManager.instance.FindTexture(container.customTextureName);
                     m_material.mainTexture = customTex as Texture;
                     customTexture = customTex;
@@ -138,8 +167,11 @@ namespace ProceduralObjects.Classes
             renderDistance = container.renderDistance;
             MaterialOptions.FixDecalRenderDist(this);
             renderDistLocked = container.renderDistLocked;
+
+            // Note: Following code needed to move into a separate pre/post-process function to avoid crashing MT process.
             if (container.textParam != null)
             {
+                meshStatus = 2;
                 m_textParameters = TextParameters.Clone(container.textParam, true);
                 for (int i = 0; i < m_textParameters.Count(); i++)
                 {
@@ -159,6 +191,8 @@ namespace ProceduralObjects.Classes
             }
             else
                 m_textParameters = null;
+            // Note end.
+
             if (container.belongsToGroup)
             {
                 if (container.groupRootId == -1)
@@ -330,9 +364,12 @@ namespace ProceduralObjects.Classes
             this.baseInfoType = "PROP";
             // this.flipFaces = false;
             this.tilingFactor = 8;
+
+            // Consider adding an event for object creation during gameplay
             m_position = ToolsModifierControl.cameraController.m_currentPosition;
             m_rotation = Quaternion.identity;
-           // Mesh mesh = sourceProp.m_mesh.InstantiateMesh();
+
+            // Mesh mesh = sourceProp.m_mesh.InstantiateMesh();
             // meshStatus = 1;
             m_material = GameObject.Instantiate(sourceProp.m_material);
             if (sourceProp.m_isDecal && ProceduralObjectsMod.AutoResizeDecals.value && !skipDecalShrink)
@@ -380,9 +417,11 @@ namespace ProceduralObjects.Classes
             this.basePrefabName = sourceBuilding.name;
             this.isPloppableAsphalt = false;
             this.baseInfoType = "BUILDING";
-           // this.flipFaces = false;
+            // this.flipFaces = false;
             // this.recalculateNormals = true;
             // this.tilingFactor = 8;
+
+            // Consider adding an event for object creation during gameplay
             m_position = ToolsModifierControl.cameraController.m_currentPosition;
             m_rotation = Quaternion.identity;
             // m_mesh = sourceBuilding.m_mesh.InstantiateMesh();
@@ -424,7 +463,11 @@ namespace ProceduralObjects.Classes
             }
         SetPos:
             m_position = pos;
+
+            // Add to DirtyMeshProperties set.
+            ChangeTracker.MarkMeshPropertiesDirty(ProceduralObjectsLogic.instance.proceduralObjects.GetSeqNoWithId(id));
         }
+
         public void SetRotation(Quaternion rot)
         {
             if (m_modules == null) goto SetRot;
@@ -436,6 +479,9 @@ namespace ProceduralObjects.Classes
             }
         SetRot:
             m_rotation = rot;
+
+            // Add to DirtyMeshProperties set.
+            ChangeTracker.MarkMeshPropertiesDirty(ProceduralObjectsLogic.instance.proceduralObjects.GetSeqNoWithId(id));
         }
 
         public void ApplyModelChange()
@@ -467,6 +513,9 @@ namespace ProceduralObjects.Classes
 
             // render distance calculation
             renderDistance = RenderOptions.instance.CalculateRenderDistance(this, false);
+
+            // Add to DirtyMesh set.
+            ChangeTracker.MarkMeshDirty(ProceduralObjectsLogic.instance.proceduralObjects.GetSeqNoWithId(id));
         }
 
         public void ChangeNormalsRecalc()
@@ -537,8 +586,12 @@ namespace ProceduralObjects.Classes
         public int id, tilingFactor; 
         // mesh status : 0=undefined ; 1=equivalent to source; 2=custom (see m_mesh)
         public byte meshStatus;
-        public float renderDistance, m_scale, halfOverlayDiam, _squareDistToCam;
-        public bool isPloppableAsphalt, disableRecalculation, disableCastShadows, renderDistLocked, flipFaces, _insideRenderView, _insideUIview, _selected;
+        public float renderDistance, m_scale, halfOverlayDiam;
+        [Obsolete]
+        public float _squareDistToCam;
+        [Obsolete]
+        public bool _insideRenderView;
+        public bool isPloppableAsphalt, disableRecalculation, disableCastShadows, renderDistLocked, flipFaces, _insideUIview, _selected;
         public ProceduralObjectVisibility m_visibility;
         public NormalsRecalculation normalsRecalcMode;
         public Color m_color;
@@ -555,6 +608,7 @@ namespace ProceduralObjects.Classes
         public BuildingInfo _baseBuilding;
 
         public GameObject tempObj;
+        public Quad ownerQuad;
 
         public HistoryBuffer historyEditionBuffer;
 

@@ -131,6 +131,42 @@ namespace ProceduralObjects.Classes
             return list.ToArray();
         }
 
+        public static Vertex[] CreateVertexList(Vector3[] sourceVertices, string dependencyData)
+        {
+            var list = new List<Vertex>();
+            var tempDictVPos = new Dictionary<Vector3, Vertex>();
+            // var sourceVertices = source.m_mesh.vertices;
+            // var dependencyData = source.m_material.name;
+            bool loadDependencyData = false;
+            if (dependencyData.Contains("[ProceduralObj]"))
+            {
+                dependencyData = dependencyData.Replace("[ProceduralObj]", "");
+                loadDependencyData = true;
+            }
+            for (int i = 0; i < sourceVertices.Count(); i++)
+            {
+                Vector3 _vertex = sourceVertices[i];
+                Vertex v = new Vertex();
+                v.Position = _vertex;
+                v.Index = i;
+                v.Locked = false;
+                if (tempDictVPos.ContainsKey(_vertex))
+                {
+                    v.IsDependent = true;
+                    v.DependencyIndex = tempDictVPos[_vertex].Index;
+                }
+                else
+                {
+                    v.IsDependent = false;
+                    tempDictVPos.Add(_vertex, v);
+                }
+                list.Add(v);
+            }
+            if (loadDependencyData)
+                ProceduralObjectAssetUtils.LoadDependencies(list, dependencyData);
+            return list.ToArray();
+        }
+
         public static Vector2[] RecalculateUVMap(ProceduralObject po, Vertex[] vertices)
         {
             if (po.basePrefabName.Contains("Cube"))

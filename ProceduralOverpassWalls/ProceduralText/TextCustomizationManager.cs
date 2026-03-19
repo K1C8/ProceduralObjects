@@ -208,6 +208,7 @@ namespace ProceduralObjects.ProceduralText
                         var oldTex = windowTex;
                         // apply changes
                         windowTex = parameters.ApplyParameters(originalTex);
+                        editingObject.meshStatus = 2;
                         editingObject.m_material.mainTexture = windowTex as Texture;
                         // save textparameters to the editingObject instance
                         editingObject.m_textParameters = parameters;

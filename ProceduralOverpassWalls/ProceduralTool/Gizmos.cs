@@ -646,6 +646,7 @@ namespace ProceduralObjects
             Gizmos.posDiffSaved = rot * Gizmos.posDiffSaved;
             logic.gizmoOffset = rot * logic.gizmoOffset;
             logic.axisHitPoint = VertexUtils.RotatePointAroundPivot(logic.axisHitPoint, logic.currentlyEditingObject.historyEditionBuffer.prevTempPos, rot);
+            // May have to check the need of using logic.currentlyEditingObject.SetPosition()
             logic.currentlyEditingObject.m_position = VertexUtils.RotatePointAroundPivot(logic.currentlyEditingObject.m_position, logic.currentlyEditingObject.historyEditionBuffer.prevTempPos, rot);
         }
 

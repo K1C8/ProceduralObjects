@@ -29,45 +29,66 @@
     <DefineConstants>TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Assembly-CSharp">
-      <HintPath>..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Cities_Skylines\Cities_Data\Managed\Assembly-CSharp.dll</HintPath>
+      <HintPath>..\..\..\..\..\build\cities-managed\Managed\Assembly-CSharp.dll</HintPath>
     </Reference>
     <Reference Include="Assembly-CSharp-firstpass">
-      <HintPath>..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Cities_Skylines\Cities_Data\Managed\Assembly-CSharp-firstpass.dll</HintPath>
+      <HintPath>..\..\..\..\..\build\cities-managed\Managed\Assembly-CSharp-firstpass.dll</HintPath>
     </Reference>
     <Reference Include="ColossalManaged">
-      <HintPath>..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Cities_Skylines\Cities_Data\Managed\ColossalManaged.dll</HintPath>
+      <HintPath>..\..\..\..\..\build\cities-managed\Managed\ColossalManaged.dll</HintPath>
     </Reference>
     <Reference Include="ICities">
-      <HintPath>..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Cities_Skylines\Cities_Data\Managed\ICities.dll</HintPath>
+      <HintPath>..\..\..\..\..\build\cities-managed\Managed\ICities.dll</HintPath>
+    </Reference>
+    <Reference Include="protobuf-net, Version=2.4.0.0, Culture=neutral, PublicKeyToken=257b51d87d2e4d67, processorArchitecture=MSIL">
+      <HintPath>..\packages\protobuf-net.2.4.9\lib\net35\protobuf-net.dll</HintPath>
     </Reference>
     <Reference Include="System" />
+    <Reference Include="System.Configuration" />
     <Reference Include="System.Core" />
+    <Reference Include="System.Runtime.Serialization" />
+    <Reference Include="System.ServiceModel" />
+    <Reference Include="System.Threading, Version=1.0.2856.102, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
+      <HintPath>..\packages\TaskParallelLibrary.1.0.2856.0\lib\Net35\System.Threading.dll</HintPath>
+    </Reference>
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="System.Data" />
     <Reference Include="System.Xml" />
     <Reference Include="UnityEngine">
-      <HintPath>..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Cities_Skylines\Cities_Data\Managed\UnityEngine.dll</HintPath>
+      <HintPath>..\..\..\..\..\build\cities-managed\Managed\UnityEngine.dll</HintPath>
     </Reference>
     <Reference Include="UnityEngine.UI">
-      <HintPath>..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Cities_Skylines\Cities_Data\Managed\UnityEngine.UI.dll</HintPath>
+      <HintPath>..\..\..\..\..\build\cities-managed\Managed\UnityEngine.UI.dll</HintPath>
     </Reference>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Classes\AdvancedEdition.cs" />
+    <Compile Include="Classes\ChangeTracker.cs" />
     <Compile Include="Classes\ClipboardProceduralObjects.cs" />
     <Compile Include="Classes\ExternalProceduralObjectsManager.cs" />
+    <Compile Include="Classes\HelperPool.cs" />
     <Compile Include="Classes\MaterialOptions.cs" />
     <Compile Include="Classes\MeasurementsManager.cs" />
     <Compile Include="Classes\POGroup.cs" />
+    <Compile Include="Classes\PropInfoHelper.cs" />
+    <Compile Include="Classes\Quad.cs" />
+    <Compile Include="Classes\QuadTree.cs" />
     <Compile Include="Classes\RenderOptions.cs" />
+    <Compile Include="Classes\ShaderConversionController.cs" />
     <Compile Include="Classes\StatisticsManager.cs" />
     <Compile Include="ProceduralModules\ModuleManager.cs" />
     <Compile Include="ProceduralModules\POModule.cs" />
     <Compile Include="ProceduralTool\POToolAction.cs" />
+    <Compile Include="Properties\Resources.Designer.cs">
+      <AutoGen>True</AutoGen>
+      <DesignTime>True</DesignTime>
+      <DependentUpon>Resources.resx</DependentUpon>
+    </Compile>
     <Compile Include="SelectionMode\AlignBetween2.cs" />
     <Compile Include="SelectionMode\AlignHeights.cs" />
     <Compile Include="SelectionMode\AlignRotations.cs" />
@@ -122,6 +143,10 @@
   <ItemGroup>
     <EmbeddedResource Include="Icons\invisible.png" />
     <EmbeddedResource Include="Icons\visible.png" />
+    <EmbeddedResource Include="Properties\Resources.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Icons\duplicate.png" />
@@ -213,10 +238,15 @@
     <EmbeddedResource Include="Icons\CTA_invertVertexSelection.png" />
     <EmbeddedResource Include="Icons\CTA_splitVertex.png" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="Assets\Bundles\ShaderPOTest.unity3d" />
+    <None Include="Assets\SrcCustomShaders\ProceduralProp.shader" />
+    <None Include="packages.config" />
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
-    <PostBuildEvent>xcopy /y  "$(TargetDir)ProceduralObjects.dll" "C:\Users\Simon\AppData\Local\Colossal Order\Cities_Skylines\Addons\Mods\ProceduralObjects"
-xcopy /y  "$(TargetDir)ProceduralObjects.dll" "C:\Program Files (x86)\Steam\steamapps\workshop\content\255710\1094334744"</PostBuildEvent>
+    <PostBuildEvent>xcopy /y  "$(TargetDir)ProceduralObjects.dll" "C:\Users\ccy01\AppData\Local\Colossal Order\Cities_Skylines\Addons\Mods\1094334744"
+xcopy /y  "$(TargetDir)ProceduralObjects.dll" "G:\Exchange\mod-debug-build\1094334744"</PostBuildEvent>
   </PropertyGroup>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.

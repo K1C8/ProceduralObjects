@@ -9,6 +9,7 @@ using UnityEngine;
 
 using ProceduralObjects.Classes;
 using ProceduralObjects.ProceduralText;
+using ProtoBuf;
 
 namespace ProceduralObjects
 {
@@ -26,14 +27,27 @@ namespace ProceduralObjects
             ProceduralObjectsLogic logic = ProceduralObjectsMod.gameLogicObject.GetComponent<ProceduralObjectsLogic>();
             if (logic == null)
                 return;
+
+            // TODO: Get rid of BinaryFormatter and choose XmlSerializer instead. Will need to have transitional saves data, data comparison tests and old data detection.
             BinaryFormatter bFormatter = new BinaryFormatter();
+
+            // Need to properly seperate dataContainer into multiple entries before serializing into MemoryStream, and multithread to do serialization. 
+            // MemoryStream is backed by a byte[] and arrays maximum length is int.MaxValue, see https://stackoverflow.com/questions/27112697/datatypes-for-memorystream-capacity-vs-memorystream-length
             ProceduralObjectContainer[] dataContainer = logic.GetContainerList();
             Layer[] layerContainer = logic.layerManager.m_layers.ToArray();
+
             try
             {
                 if (dataContainer != null)
                 {
                     bFormatter.Serialize(proceduralObjStream, dataContainer);
+                    // TODO: Write byteArrayCopyTime to binary file for ref.
+                    DateTime startTime = DateTime.Now;
+                    string formattedTime = startTime.ToString("yyyyMMddHHmmss");
+                    string testOutputPath = string.Format($"D:\\Test\\original_{formattedTime}.bin");
+
+                    File.WriteAllBytes(testOutputPath, proceduralObjStream.ToArray());
+
                     var splittedDict = SplitArray(proceduralObjStream.ToArray());
                     foreach (string key in serializableDataManager.EnumerateData())
                     {
@@ -86,6 +100,7 @@ namespace ProceduralObjects
                     arrays.Add(serializableDataManager.LoadData(dataKey + i.ToString()));
             }
             Debug.Log("[ProceduralObjects] Data loading : found " + arrays.Count.ToString() + " splited data arrays.");
+            var startTime = DateTime.Now;
             long length = 0;
             for (int i = 0; i < arrays.Count; i++)
                 length += arrays[i].Length;
@@ -96,10 +111,21 @@ namespace ProceduralObjects
                 Array.Copy(arrays[i], 0, byteProceduralObjectsArray, currentLength, arrays[i].Length);
                 currentLength += arrays[i].Length;
             }
+            var byteArrayCopyTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
+            Debug.Log("[ProceduralObjects] byteProceduralObjectsArray finished in " + byteArrayCopyTime + " seconds");
+            // TODO: Write byteArrayCopyTime to binary file for ref.
+            //string formattedTime = startTime.ToString("yyyyMMddHHmmss");
+            //string testOutputPath = string.Format($"D:\\Test\\original_{formattedTime}.bin");
+
+            //File.WriteAllBytes(testOutputPath, byteProceduralObjectsArray);
+
             if (byteProceduralObjectsArray.Length > 0)
             {
                 MemoryStream proceduralObjStream = new MemoryStream();
                 proceduralObjStream.Write(byteProceduralObjectsArray, 0, byteProceduralObjectsArray.Length);
+                var memStreamWriteTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
+                Debug.Log("[ProceduralObjects] memStreamWriteTime finished in " + (memStreamWriteTime - byteArrayCopyTime) + " seconds");
+
                 proceduralObjStream.Position = 0;
                 try
                 {
@@ -108,6 +134,9 @@ namespace ProceduralObjects
                     {
                         ProceduralObjectsMod.tempContainerData = data;
                         Debug.Log("[ProceduralObjects] Data Loading : transfered " + data.Count() + " ProceduralObjectContainer instances to ProceduralObjectsLogic.");
+
+                        var memStreamDeserializeTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
+                        Debug.Log("[ProceduralObjects] memStreamDeserializeTime finished in " + (memStreamDeserializeTime - memStreamWriteTime) + " seconds");
                     }
                     else
                         Debug.LogWarning("[ProceduralObjects] No procedural object found while loading the map.");
@@ -126,6 +155,10 @@ namespace ProceduralObjects
             {
                 Debug.Log("[ProceduralObjects] No objects data was found to load!");
             }
+
+            var byteObjectDeserializeTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
+            Debug.Log("[ProceduralObjects] byteObjectDeserialize finished in " + (byteObjectDeserializeTime - byteArrayCopyTime) + " seconds");
+
             byte[] layerData = serializableDataManager.LoadData(layerKey);
             if (layerData != null)
             {
@@ -152,6 +185,10 @@ namespace ProceduralObjects
                     layerStream.Close();
                 }
             }
+
+            var layerLoadTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
+            Debug.Log("[ProceduralObjects] layerLoad finished in " + (layerLoadTime - byteObjectDeserializeTime) + " seconds");
+
             Debug.Log("[ProceduralObjects] Data loading ended.");
         }
 
@@ -287,10 +324,14 @@ namespace ProceduralObjects
             }
         }
     }
+
+    [ProtoContract]
     [Serializable]
     public class SerializableVector3
     {
-        public float x, y, z;
+        [ProtoMember(1)] public float x;
+        [ProtoMember(2)] public float y;
+        [ProtoMember(3)] public float z;
         public SerializableVector3() { }
         public SerializableVector3(Vector3 source)
         {
@@ -329,10 +370,15 @@ namespace ProceduralObjects
             return new Vector3(value.x, value.y, value.z);
         }
     }
+
+    [ProtoContract]
     [Serializable]
     public class SerializableQuaternion
     {
-        public float x, y, z, w;
+        [ProtoMember(1)] public float x;
+        [ProtoMember(2)] public float y;
+        [ProtoMember(3)] public float z;
+        [ProtoMember(4)] public float w;
         public SerializableQuaternion() { }
         public SerializableQuaternion(Quaternion source)
         {
@@ -343,10 +389,14 @@ namespace ProceduralObjects
         }
     }
 
+    [ProtoContract]
     [Serializable]
     public class SerializableColor
     {
-        public float r, g, b, a;
+        [ProtoMember(1)] public float r;
+        [ProtoMember(2)] public float g;
+        [ProtoMember(3)] public float b;
+        [ProtoMember(4)] public float a;
         public SerializableColor() { }
         public SerializableColor(SerializableColor c)
         {

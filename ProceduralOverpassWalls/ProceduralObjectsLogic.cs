@@ -1,22 +1,26 @@
-﻿using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System;
-using UnityEngine.Rendering;
-using UnityEngine;
-using System.IO;
-
-using ProceduralObjects.Classes;
-using ProceduralObjects.UI;
-using ProceduralObjects.Tools;
-using ProceduralObjects.SelectionMode;
-using ProceduralObjects.Localization;
-using ProceduralObjects.ProceduralText;
-
-using ColossalFramework.UI;
+﻿using ColossalFramework;
 using ColossalFramework.Globalization;
 using ColossalFramework.PlatformServices;
-using ColossalFramework;
+using ColossalFramework.UI;
+using ProceduralObjects.Classes;
+using ProceduralObjects.Localization;
+using ProceduralObjects.ProceduralText;
+using ProceduralObjects.SelectionMode;
+using ProceduralObjects.Tools;
+using ProceduralObjects.UI;
+using System;
+using System.Collections;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using UnityEngine;
+using UnityEngine.Profiling;
+using UnityEngine.Rendering;
 
 namespace ProceduralObjects
 {
@@ -89,10 +93,61 @@ namespace ProceduralObjects
         public MeasurementsManager measurementsManager;
         public SelectionFilters filters;
 
+        public ShaderConversionController shaderConversionController;
+        
+        public int maxThreadCount;
+
+        // Debug and profiling.
+        public int lastGCCount;
+        public double cacheSortTime;
+        public double totalBatchingTime;
+        public double totalBatchRenderPipelineTime;
+        public double totalUpdateTime;
+        public int totalBatchCount;
+        public int totalBatchedPoCount;
+        public double lastFrameTime;
+        private int frameCount;
+        private double poCalcTimeSum;
+        private double poDrawMeshTimeSum;
+        private double poUpdateTimeSum;
+        private DateTime lastUpdateFinishDateTime;
+
         public bool showLayerSetScroll = false, showMoreTools = false;
         private Vector2 scrollLayerSet = Vector2.zero;
 
         private static AudioClip[] audiosClips;
+
+        private bool isGPUSupportInstancing = false;
+        private Dictionary<string, Shader> loadedShaders = ProceduralUtils.LoadShader();
+        private Plane[] frustum = new Plane[6];
+
+        private readonly ConcurrentDictionary<int, MeshProperties[]> equivalentDict
+             = new ConcurrentDictionary<int, MeshProperties[]>();
+        private readonly ConcurrentDictionary<int, int> equivalentDictUsageTracker
+            = new ConcurrentDictionary<int, int>();
+        private bool[] visibilityArray;
+        //private ConcurrentDictionary<Mesh, Material> equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
+        private List<int> unbatchedPoSeqList = new List<int>();
+        //private List<int> overlayList = new List<int>();
+        private MaterialPropertyBlock propertyBlock;
+        //private Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]> equivalentDictCache;
+        //private Dictionary<Mesh, Matrix4x4[]> equivalentTRSDictCache;
+        //private Dictionary<Mesh, ShadowCastingMode[]> equivalentShadowCastingDictCache;
+        //private Dictionary<Mesh, Color[]> equivalentColorDictCache;
+        //private Dictionary<Mesh, Vector4[]> equivalentColorDictCache;
+        private Dictionary<int, ComputeBuffer> equivalentPropertiesComputeBuffer;
+        private Dictionary<int, ComputeBuffer> equivalentArgsComputeBuffer;
+        private uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
+        private QuadTree quadTree;
+        object dictLock = new object();
+        object listLock = new object();
+
+        //private ComputeBuffer[] argsBufferArray;
+        //private ComputeBuffer meshPropertiesBuffer;
+        //private uint[] args;
+        public QuadTree QuadTree { get { return quadTree; } }
+
+        private static Dictionary<int, int> _poIdToSeqNoCache = new Dictionary<int, int>();
 
         void Start()
         {
@@ -128,6 +183,7 @@ namespace ProceduralObjects
             new TextureManager().LoadTextures();
             availableProceduralInfos = ProceduralUtils.CreateProceduralInfosList();
             Debug.Log("[ProceduralObjects] Found " + availableProceduralInfos.Count.ToString() + " procedural infos.");
+            var fontAndMiscGUILoadStartTime = DateTime.Now;
             fontManager = new FontManager(); // loads fonts
             FontManager.instance = fontManager;
             textManager = new TextCustomizationManager(fontManager);
@@ -151,6 +207,12 @@ namespace ProceduralObjects
             moduleManager = new ModuleManager(this);
             measurementsManager = new MeasurementsManager(this);
             filters = new SelectionFilters();
+            lastGCCount = GC.CollectionCount(0); 
+
+            double fontAndMiscGUILoadingTime = Math.Round((DateTime.Now - fontAndMiscGUILoadStartTime).TotalSeconds, 2);
+            Debug.Log("[ProceduralObjects] Fonts, GUI and misc items loaded in " + fontAndMiscGUILoadingTime + " seconds");
+
+            var layerAndContainerLoadStartTime = DateTime.Now;
             if (ProceduralObjectsMod.tempLayerData != null)
             {
                 layerManager.m_layers = ProceduralObjectsMod.tempLayerData.ToList();
@@ -159,7 +221,10 @@ namespace ProceduralObjects
             if (ProceduralObjectsMod.tempContainerData != null)
             {
                 this.LoadContainerData(ProceduralObjectsMod.tempContainerData);
+                DateTime groupBuildingStartTime = DateTime.Now;
                 groups = this.BuildGroupsFromData();
+                double groupBuildingTime = Math.Round((DateTime.Now - groupBuildingStartTime).TotalSeconds, 2);
+                Debug.Log(string.Format("[ProceduralObjects] PO groupped in {0} seconds.", groupBuildingTime));
                 ProceduralObjectsMod.tempContainerData = null;
             }
             else
@@ -168,6 +233,14 @@ namespace ProceduralObjects
                 groups = new List<POGroup>();
                 activeIds = new HashSet<int>();
             }
+            double layerAndContainerLoadingTime = Math.Round((DateTime.Now - layerAndContainerLoadStartTime).TotalSeconds, 2);
+            Debug.Log("[ProceduralObjects] Layers and PO data loaded in " + layerAndContainerLoadingTime + " seconds");
+
+            DateTime staticsStart = DateTime.Now;
+            quadTree = new QuadTree(8); //, proceduralObjects);
+            double staticsTime = Math.Round((DateTime.Now - staticsStart).TotalMilliseconds, 2);
+            Debug.Log("[ProceduralObjects] Building QuadTree and checking potential batchable modified object in " + staticsTime + " milliseconds");
+
             new POStatisticsManager(this);
             ProceduralTool.CreateCursors();
             // CT default actions
@@ -185,12 +258,94 @@ namespace ProceduralObjects
             redLabelStyle.normal.textColor = Color.red;
             editingVertexIndex = new List<int>();
             LocaleManager.eventLocaleChanged += SelectSetupLocalization;
+
+            // Tests for DrawMeshInstanced on props with meshStatus==1
+            isGPUSupportInstancing = SystemInfo.supportsInstancing; 
+            //equivalentDict = new ConcurrentDictionary<int, List<MeshProperties>>();
+            //equivalentDictCache = new Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]>();
+            //equivalentMtlDict = new ConcurrentDictionary<Mesh, Material>();
+            unbatchedPoSeqList = new List<int>();
+            //overlayList = new List<int>();
+            propertyBlock = new MaterialPropertyBlock();
+            //propertyBlock.SetColor("_Color", Color.white);
+
+
+            //equivalentTRSDictCache = new Dictionary<Mesh, Matrix4x4[]>();
+            //equivalentShadowCastingDictCache = new Dictionary<Mesh, ShadowCastingMode[]>();
+            //equivalentColorDictCache = new Dictionary<Mesh, Vector4[]>();
+
+            Debug.Log(string.Format("[ProceduralObjects] Checking for compatibility, isGPUSupportInstancing: {0}, shaders contains testshaderind: {1}", isGPUSupportInstancing, loadedShaders.ContainsKey("Custom/ProceduralObject/Prop/testshaderind")));
+
+            long updateCount = 0;
+            visibilityArray = new bool[proceduralObjects.Count];
+
+            if (isGPUSupportInstancing && proceduralObjects != null && loadedShaders.ContainsKey("Custom/ProceduralObject/Prop/testshaderind"))
+            {
+                if (SystemInfo.processorType.Contains("Intel"))
+                {
+                    maxThreadCount = Environment.ProcessorCount <= 16 ? Environment.ProcessorCount : 16;
+                }
+                else
+                {
+                    maxThreadCount = Environment.ProcessorCount <= 64 ? Environment.ProcessorCount : 64;
+                }
+                //string instancingKeyword = "INSTANCING_ON";
+                //string shadeCastingKeyword = "SHADOWS_SCREEN";
+                equivalentPropertiesComputeBuffer = new Dictionary<int, ComputeBuffer>();
+                equivalentArgsComputeBuffer = new Dictionary<int, ComputeBuffer>();
+                uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
+                loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testshaderind", out Shader instancedTestShader);
+                shaderConversionController = new ShaderConversionController();
+                shaderConversionController.DefaultPropInstancedShader = instancedTestShader;
+
+                List<Quad> leafQuads = quadTree.GetLeafQuads();
+                HashSet<int> unbatchedPoSeqs = new HashSet<int>();
+
+                foreach (Quad quad in leafQuads)
+                {
+                    unbatchedPoSeqs.UnionWith(quad.unbatchableList);
+                }
+
+                for (int i = 0; i < proceduralObjects.Count; i++)
+                {
+                    if (unbatchedPoSeqs.Contains(i))
+                        continue;
+
+                    var obj = proceduralObjects[i];
+                    shaderConversionController.DefaultPropConvertToInstancedShader(obj);
+                    if (obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testshaderind"))
+                    {
+                        updateCount++;
+                    }
+//                    if (obj.m_material.shader.name.Equals("Custom/Props/Prop/Default"))
+//                    {
+//                        obj.m_material.shader = instancedTestShader;
+//                        obj.m_material.EnableKeyword(shadeCastingKeyword);
+//                        obj.m_material.enableInstancing = true;
+//                        updateCount++;
+//#if DEBUG
+//                        Debug.Log(string.Format("[ProceduralObjects] Modifing {0}, {1}, {2} properties of shader {3} to {4}, {5}, {6}",
+//                            instancingKeyword, "", "", 
+//                            proceduralObjects[i].m_material.shader.name, 
+//                            proceduralObjects[i].m_material.IsKeywordEnabled(instancingKeyword), proceduralObjects[i].m_material.IsKeywordEnabled(instancingKeyword), proceduralObjects[i].m_material.IsKeywordEnabled(instancingKeyword)));
+//#endif
+//                    }
+
+                }
+                unbatchedPoSeqs.Clear();
+            }
+
+            lastUpdateFinishDateTime = DateTime.Now;
+
             loadingTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
+            Debug.Log("[ProceduralObjects] Game start procedure updated " + updateCount + " procedural objects with test shader.");
             Debug.Log("[ProceduralObjects] Game start procedure ended in " + loadingTime + " seconds");
+            
         }
 
         void Update()
         {
+            DateTime updateStart = DateTime.Now;
             // Cloning for Move It
             if (PO_MoveIt.queuedCloning.Count > 0)
             {
@@ -242,6 +397,8 @@ namespace ProceduralObjects
                         po.m_color = c;
                         po.m_material.color = c;
                         proceduralObjects.Add(po);
+                        // Consider adding an event for object creation during gameplay
+                        ChangeTracker.AddObjectToQuadTree(proceduralObjects.GetSeqNoWithId(po.id));
                         req.converted = po;
                     }
                     catch
@@ -274,11 +431,183 @@ namespace ProceduralObjects
                 CallConvertToPO(ToolsModifierControl.toolController.CurrentTool);
             }
 
+            frameCount++;
+            var startTime = DateTime.Now;
+            var timeFromLastUpdate = Math.Round((DateTime.Now - lastUpdateFinishDateTime).TotalMilliseconds, 2);
+
+            //quadTree.DrawQuadBounds();
+
             if (proceduralObjects != null)
             {
+                unbatchedPoSeqList.Clear();
+                foreach (KeyValuePair<int, int> kv in equivalentDictUsageTracker)
+                {
+                    equivalentDictUsageTracker[kv.Key] = 0;
+                }
+                if (proceduralObjects.Count != visibilityArray.Length)
+                {
+                    visibilityArray = new bool[proceduralObjects.Count];
+                }
+                for (int i = 0; i < visibilityArray.Length; i++)
+                {
+                    visibilityArray[i] = false;
+                }
+                //overlayList.Clear(); 
+
+                List<Quad> leafQuads = quadTree.GetLeafQuads();
+                List<Quad> visibleLeafQuads = new List<Quad>();
+                frustum = GeometryUtility.CalculateFrustumPlanes(renderCamera);
+                List<int> viewportPoSeqList = HelperPool.GetIntList();
+                foreach (Quad quad in leafQuads)
+                {
+                    if (GeometryUtility.TestPlanesAABB(frustum, quad.bounds))
+                    {
+                        visibleLeafQuads.Add(quad);
+                        viewportPoSeqList.AddRange(quad.allPoSeqList);
+                    }
+                }
+
                 var sqrDynMinThreshold = ProceduralObjectsMod.DynamicRDMinThreshold.value * ProceduralObjectsMod.DynamicRDMinThreshold.value;
                 bool isNightTime = Singleton<SimulationManager>.instance.m_isNightTime;
-                for (int i = 0; i < proceduralObjects.Count; i++)
+                Vector3 camPos = renderCamera.transform.position;
+                Matrix4x4 w2c = renderCamera.worldToCameraMatrix;
+
+                ProceduralUtils.TestPoInViewAndProcessMultiThreadWrapper(viewportPoSeqList, w2c, camPos, sqrDynMinThreshold, isNightTime, visibilityArray);
+
+                Parallel.For(0, visibleLeafQuads.Count, new ParallelOptions { MaxDegreeOfParallelism = maxThreadCount }, 
+                    () => new SortingLists(HelperPool.GetIntMeshPropDict(), HelperPool.GetIntList()),
+                    (i, loop, localLists) =>
+                {
+                    Quad current = visibleLeafQuads[i];
+                    for (int j = 0; j < current.unbatchableList.Count; j ++)
+                    {
+                        int seqNo = current.unbatchableList[j];
+
+                        //if (visibilitySet.Contains(seqNo))
+                        if (visibilityArray[seqNo])
+                            localLists.localUnbatchedList.Add(seqNo);
+                    }
+
+                    ProceduralUtils.ProcessBatchablePoDict(localLists, current.batchCustomPoIdDict, current.batchCustomArrayDict, visibilityArray);
+
+                    //Debug.Log($"[ProceduralObjects] Quad {current.bounds.center} has {localLists.localUnbatchedList.Count} POs are unbatched, and has" +
+                    //    $" {localLists.localBatchDict.Count} types of batched POs.");
+
+                    return localLists;
+                }, localLists =>
+                {
+                    lock (dictLock)
+                    {
+                        foreach (var kv in localLists.localBatchDict)
+                        {
+                            if (kv.Value == null)
+                                continue;
+                            MeshProperties[] existing;
+                            if (!equivalentDict.TryGetValue(kv.Key, out existing) || !equivalentDictUsageTracker.ContainsKey(kv.Key))
+                            {
+                                existing = new MeshProperties[kv.Value.Count];
+                                equivalentDict[kv.Key] = existing;
+                                equivalentDictUsageTracker[kv.Key] = 0;
+                            }
+                            else if (existing.Length - equivalentDictUsageTracker[kv.Key] < kv.Value.Count)
+                            {
+                                Debug.Log($"[ProceduralObjects] Processing result, current list {kv.Key} needs to be expanded to new capacity.");
+                                int newSize = Math.Max(existing.Length << 1, kv.Value.Count + equivalentDictUsageTracker[kv.Key]);
+                                if (newSize == 0)
+                                {
+                                    newSize = 2;
+                                }    
+                                while (newSize < kv.Value.Count + equivalentDictUsageTracker[kv.Key])
+                                {
+                                    newSize <<= 1;
+                                }
+                                existing = new MeshProperties[newSize];
+                                equivalentDict[kv.Key].CopyTo(existing, 0);
+                                equivalentDict[kv.Key] = existing;
+                                Debug.Log($"[ProceduralObjects] Processing result, current list {kv.Key} has been expanded with a capacity of {newSize}.");
+                            }
+                            if (kv.Value.Count > 0)
+                            {
+                                kv.Value.CopyTo(existing, equivalentDictUsageTracker[kv.Key]);
+                                equivalentDictUsageTracker[kv.Key] += kv.Value.Count;
+                            }
+                        }
+                    }
+                    if (localLists.localUnbatchedList.Count > 0)
+                    {
+                        lock (listLock)
+                        {
+                            unbatchedPoSeqList.AddRange(localLists.localUnbatchedList);
+                        }
+                    }
+
+                    HelperPool.ReturnIntMeshPropDict(localLists.localBatchDict);
+                    HelperPool.ReturnIntList(localLists.localUnbatchedList);
+                });
+
+                DateTime sortStartTime = DateTime.Now;
+
+                foreach (var kv in equivalentDict)
+                {
+                    int size = equivalentDictUsageTracker[kv.Key];
+                    // Processing blank queue/list in equivalentDict.
+                    if (size <= 0)
+                    {
+                        //equivalentDict.TryRemove(pair.Key, out _);
+                        //equivalentMtlDict.TryRemove(pair.Key, out _);
+                        continue;
+                    }
+
+                    if (!equivalentPropertiesComputeBuffer.ContainsKey(kv.Key))
+                    {
+                        equivalentPropertiesComputeBuffer.Add(kv.Key, new ComputeBuffer(size, MeshProperties.Size()));
+                    }
+                    // TODO: Not fully tested.
+                    else if (equivalentPropertiesComputeBuffer[kv.Key].count < size)
+                    {
+                        equivalentPropertiesComputeBuffer.TryGetValue(kv.Key, out ComputeBuffer bufferToUpdate);
+                        bufferToUpdate.Release();
+                        equivalentPropertiesComputeBuffer[kv.Key] = new ComputeBuffer(size, MeshProperties.Size());
+                    }
+                    if (!equivalentArgsComputeBuffer.ContainsKey(kv.Key))
+                    {
+                        equivalentArgsComputeBuffer.Add(kv.Key, new ComputeBuffer(1, 5 * sizeof(uint), ComputeBufferType.IndirectArguments));
+                    }
+                    Mesh mesh = proceduralObjects[kv.Key].m_mesh;
+                    args[0] = mesh.GetIndexCount(0);
+                    args[1] = (uint)size;
+                    args[2] = mesh.GetIndexStart(0);
+
+                    ComputeBuffer meshPropertiesBuffer = equivalentPropertiesComputeBuffer[kv.Key];
+                    ComputeBuffer argsBuffer = equivalentArgsComputeBuffer[kv.Key];
+
+                    //MeshProperties[] propertiesArray = pair.Value.ToArray();
+                    //pair.Value.Clear();
+
+                    argsBuffer.SetData(args);
+                    meshPropertiesBuffer.SetData(kv.Value);
+
+                    Array.Clear(kv.Value, 0, kv.Value.Length);
+                    //equivalentDictUsageTracker[kv.Key] = 0; // Usage value is needed in later loops. Value clearing was moved to the top of the block.
+
+                }
+
+                HelperPool.ReturnIntList(viewportPoSeqList);
+                //HelperPool.ReturnVisibilitySet(visibilitySet);
+                leafQuads.Clear();
+
+                cacheSortTime = Math.Round((double)(DateTime.Now - sortStartTime).Ticks / 10000, 2);
+                totalBatchingTime = Math.Round((double)(DateTime.Now - startTime).Ticks / 10000, 2);
+                int gcCount = GC.CollectionCount(0);
+
+                if (gcCount != lastGCCount)
+                {
+                    Debug.Log($"[ProceduralObjects] GC happened during last sort. GC Count reads {gcCount}.");
+                    lastGCCount = gcCount;
+                }
+
+                // Original Version
+                /*for (int i = 0; i < proceduralObjects.Count; i++)
                 {
                     var obj = proceduralObjects[i];
                     bool infiniteDist = obj.renderDistance >= 16001;
@@ -317,7 +646,9 @@ namespace ProceduralObjects
                         try
                         {
                             if (RenderOptions.instance.CanRenderSingle(obj, isNightTime))
+                            {
                                 Graphics.DrawMesh(obj.m_mesh, obj.m_position, obj.m_rotation, obj.m_material, 0, null, 0, null, !obj.disableCastShadows, true);
+                            }
 
                             if (SingleHoveredObj == obj || (selectedGroup == null ? (obj.group == null ? false : obj.group.root == SingleHoveredObj) : false))
                                 Graphics.DrawMesh(obj.overlayRenderMesh, obj.m_position, obj.m_rotation, 
@@ -334,7 +665,106 @@ namespace ProceduralObjects
                                 (renderCamera == null).ToString());
                         }
                     }
+                }*/
+            }
+
+            var poCalcTime = Math.Round((DateTime.Now - startTime).TotalMilliseconds, 2);
+            poCalcTimeSum += poCalcTime;
+
+            if (proceduralObjects != null)
+            {
+                try
+                {
+                    if (equivalentArgsComputeBuffer != null && equivalentArgsComputeBuffer.Count == 0 && frameCount % 100 == 0)
+                    {
+                        Debug.Log("[ProceduralObjects] DrawMesh code block has no instanced mesh(es) to draw.");
+                    }
+
+                    totalBatchCount = 0;
+                    totalBatchedPoCount = 0;
+                    foreach (var pair in equivalentDict)
+                    {
+                        int currentBatchSize = 0;
+                        
+                        if (!equivalentDictUsageTracker.TryGetValue(pair.Key, out currentBatchSize) || currentBatchSize == 0)
+                        {
+                            continue;
+                        }
+                        if (!equivalentArgsComputeBuffer.ContainsKey(pair.Key))
+                        {
+                            Debug.Log($"[ProceduralObjects] Key {pair.Key} could not find in equivalentArgsComputeBuffer during rendering process.");
+                            continue;
+                        }
+                        if (!equivalentPropertiesComputeBuffer.ContainsKey(pair.Key))
+                        {
+                            Debug.Log($"[ProceduralObjects] Key {pair.Key} could not find in equivalentPropertiesComputeBuffer during rendering process.");
+                            continue;
+                        }
+                        ComputeBuffer argsBuffer = equivalentArgsComputeBuffer[pair.Key];
+                        ComputeBuffer meshPropertiesBuffer = equivalentPropertiesComputeBuffer[pair.Key];
+                        Mesh mesh = proceduralObjects[pair.Key].m_mesh;
+
+                        if (mesh == null)
+                        {
+                            Debug.Log("[ProceduralObjects] Empty mesh encountered during rendering process.");
+                            continue;
+                        }
+
+                        Material material = proceduralObjects[pair.Key].m_material;
+
+                        propertyBlock.SetBuffer("_Properties", meshPropertiesBuffer);
+                        try
+                        {
+                            Graphics.DrawMeshInstancedIndirect(mesh, 0, material, new Bounds(Vector3.zero, new Vector3(32000f, 10240f, 32000f)), argsBuffer, 0, propertyBlock, ShadowCastingMode.On, true, 0, renderCamera);
+                            totalBatchCount++;
+                            totalBatchedPoCount += currentBatchSize;
+                        }
+                        catch (Exception e)
+                        {
+                            Debug.LogError("[ProceduralObjects] Error while rendering mesh instanced indirect " + mesh.name + ": " + e.Message + " - Stack Trace : " + e.StackTrace);
+                        }
+                    }
+
+                    foreach (var index in unbatchedPoSeqList)
+                    {
+                        ProceduralObject obj = proceduralObjects[index];
+                        Graphics.DrawMesh(obj.m_mesh, obj.m_position, obj.m_rotation,
+                            obj.m_material, 0, null, 0, null, !obj.disableCastShadows, true);
+                    }
+
+                    // If the user is hovering on single ungroupped object, or single object in a group when a group is selected, overlay it with purple.
+                    // If the user is hovering on the root of a group, overlay the group with red.
+                    if (SingleHoveredObj != null)
+                    {
+                        if (selectedGroup == null && SingleHoveredObj.isRootOfGroup)
+                        {
+                            // Process the group that its root is being hovered on, overlay with red.
+                            foreach (var obj in SingleHoveredObj.group.objects)
+                            {
+                                Graphics.DrawMesh(obj.overlayRenderMesh, obj.m_position, obj.m_rotation, redOverlayMat, 0, null, 0, null, false, false);
+                            }
+                        }
+                        else
+                        {
+                            // Render the object hovered in a selected group or not belonging to a group in red.
+                            Graphics.DrawMesh(SingleHoveredObj.overlayRenderMesh, SingleHoveredObj.m_position, SingleHoveredObj.m_rotation, purpleOverlayMat,
+                                0, null, 0, null, false, false);
+                        }
+                    }
+
+
                 }
+                catch (Exception e)
+                {
+                    Debug.LogError("[ProceduralObjects] Error while rendering objects " + e.Message + " - Stack Trace : " + e.StackTrace);
+                }
+
+                var poDrawMeshTime = Math.Round((DateTime.Now - startTime).TotalMilliseconds, 2) - poCalcTime;
+                totalBatchRenderPipelineTime = Math.Round((double)(DateTime.Now - startTime).Ticks / 10000, 2);
+                poDrawMeshTimeSum += poDrawMeshTime;
+
+                Debug.Log(string.Format("[ProceduralObjects] Batching process consumed {0} ms, sorting equivalentDictCache consumed {1} ms to complete. {2} POs rendered batched in {3} batches, {4} POs rendered individually this frame.",
+                    totalBatchingTime, cacheSortTime, totalBatchedPoCount, totalBatchCount, unbatchedPoSeqList.Count));
 
                 if (moduleManager.enabledModules.Count > 0)
                 {
@@ -347,8 +777,35 @@ namespace ProceduralObjects
                         bool layerVisible = m.parentObject.layer == null;
                         if (!layerVisible)
                             layerVisible = !m.parentObject.layer.m_isHidden;
-                        try { m.UpdateModule(this, simPaused, layerVisible); }
-                        catch (Exception e) { Debug.LogError("[ProceduralObjects] Error inside module UpdateModule() method!\n" + e); }
+                        Vector3 moduleParentOldPosition = m.parentObject.m_position;
+                        Quaternion moduleParentOldRotation = m.parentObject.m_rotation;
+                        try 
+                        { 
+                            m.UpdateModule(this, simPaused, layerVisible); 
+                            if (m.parentObject.m_position != moduleParentOldPosition)
+                            {
+                                m.parentObject.SetPosition(m.parentObject.m_position);
+                            }
+                            if (m.parentObject.m_rotation != moduleParentOldRotation)
+                            {
+                                m.parentObject.SetRotation(m.parentObject.m_rotation);
+                            }
+                            if (m.parentObject.isRootOfGroup && (m.parentObject.m_position != moduleParentOldPosition || m.parentObject.m_rotation != moduleParentOldRotation))
+                            {
+                                foreach (ProceduralObject child in m.parentObject.group.objects)
+                                {
+                                    if (!child.isRootOfGroup)
+                                    {
+                                        ChangeTracker.MarkMeshPropertiesDirty(proceduralObjects.GetSeqNoWithId(child.id));
+                                    }
+                                }
+                            }
+                        }
+                        // Add a simple compare here for the position/rotation before and after UpdateModule(). Add to dirty sets if anything changed.
+                        catch (Exception e) 
+                        { 
+                            Debug.LogError("[ProceduralObjects] Error inside module UpdateModule() method!\n" + e); 
+                        }
                     }
                 }
             }
@@ -407,7 +864,10 @@ namespace ProceduralObjects
                                             if (obj.group != null)
                                                 obj.group.Remove(this, obj);
                                             moduleManager.DeleteAllModules(obj);
-                                            proceduralObjects.Remove(obj);
+                                            int seqNo = proceduralObjects.GetSeqNoWithId(obj.id);
+                                            InvalidSeqCacheById(obj.id); // Caching Test
+                                            //proceduralObjects[seqNo] = null;
+                                            //proceduralObjects.Remove(obj);
                                             activeIds.Remove(obj.id);
                                         }
                                         pObjSelection.Clear();
@@ -614,8 +1074,11 @@ namespace ProceduralObjects
                             currentlyEditingObject.tempObj.transform.rotation = currentlyEditingObject.m_rotation;
                             foreach (var kvp in moveToSelection)
                             {
-                                kvp.Key.m_position = kvp.Value.position;
-                                kvp.Key.m_rotation = kvp.Value.rotation;
+                                // Need changes here. Should use the SetPosition() and SetRotation()
+                                kvp.Key.SetPosition(kvp.Value.position);
+                                kvp.Key.SetRotation(kvp.Value.rotation);
+                                //kvp.Key.m_position = kvp.Value.position;
+                                //kvp.Key.m_rotation = kvp.Value.rotation;
                             }
                         }
                     }
@@ -635,7 +1098,8 @@ namespace ProceduralObjects
                                 {
                                     currentlyEditingObject.historyEditionBuffer.axisUsed = axisState;
                                     var obj = CloneObject(currentlyEditingObject);
-                                    obj.m_position = currentlyEditingObject.historyEditionBuffer.prevTempPos;
+                                    //obj.m_position = currentlyEditingObject.historyEditionBuffer.prevTempPos;
+                                    obj.SetPosition(currentlyEditingObject.historyEditionBuffer.prevTempPos);
                                     if (selectedGroup != null)
                                         selectedGroup.AddToGroup(obj);
 
@@ -653,7 +1117,9 @@ namespace ProceduralObjects
                                             for (int i = 1; i < draw; i++)
                                             {
                                                 var lineobj = CloneObject(currentlyEditingObject);
-                                                lineobj.m_position = drawpos;
+                                                //lineobj.m_position = drawpos;
+                                                lineobj.SetPosition(drawpos);
+                                                // Consider adding an event for updating Quad after object cloning
                                                 drawpos += Gizmos.posDiffSaved;
                                                 if (selectedGroup != null)
                                                     selectedGroup.AddToGroup(lineobj);
@@ -784,7 +1250,7 @@ namespace ProceduralObjects
                                 Gizmos.CreateScaleGizmo(currentlyEditingObject.m_position, true);
                             }
                         }
-                        #region Gizmo movement - WHOLE MODEL
+#region Gizmo movement - WHOLE MODEL
                         if (axisState != AxisEditionState.none)
                         {
                             if (Input.GetMouseButton(0))
@@ -902,13 +1368,16 @@ namespace ProceduralObjects
                                                     {
                                                         try
                                                         {
+                                                            // One frame drawing only.
                                                             Graphics.DrawMesh(currentlyEditingObject.m_mesh, drawpos,
                                                                 currentlyEditingObject.m_rotation, currentlyEditingObject.m_material, 0, renderCamera, 0, null, !currentlyEditingObject.disableCastShadows, true);
                                                         }
                                                         catch { }
                                                         drawpos += Gizmos.posDiffSaved;
                                                     }
-                                                    currentlyEditingObject.m_position = drawpos;
+                                                    // Should change to currentlyEditingObject.SetPosition(drawpos)
+                                                    //currentlyEditingObject.m_position = drawpos;
+                                                    currentlyEditingObject.SetPosition(drawpos);
                                                 }
                                                 Gizmos.DetectRotationKeyboard();
                                             }
@@ -1068,7 +1537,7 @@ namespace ProceduralObjects
                         {
                             Gizmos.Update(actionMode, Vector3.Distance(renderCamera.transform.position, currentlyEditingObject.m_position), currentlyEditingObject.m_position, currentlyEditingObject.m_rotation, renderCamera);
                         }
-                        #endregion
+#endregion
                     }
                     else // vertex customization
                     {
@@ -1206,10 +1675,10 @@ namespace ProceduralObjects
                         // SMOOTH
                         if (!KeyBindingsManager.instance.GetBindingFromName("edition_smallMovements").GetBinding())
                         {
-                            #region deplacement SMOOTH + VITE
+#region deplacement SMOOTH + VITE
                             if (editingVertex)
                             {
-                                #region déplacement des vertex
+#region déplacement des vertex
                                 if (KeyBindingsManager.instance.GetBindingFromName("position_moveUp").GetBinding())
                                 {
                                     currentlyEditingObject.historyEditionBuffer.InitializeNewStep(EditingStep.StepType.vertices, currentlyEditingObject.vertices);
@@ -1252,11 +1721,11 @@ namespace ProceduralObjects
                                         currentlyEditingObject.vertices[v.Index].Position.x -= 5f * TimeUtils.deltaTime;
                                     Apply();
                                 }
-                                #endregion
+#endregion
                             }
                             else if (editingWholeModel && axisState == AxisEditionState.none)
                             {
-                                #region déplacement du modèle
+#region déplacement du modèle
                                 switch (actionMode)
                                 {
                                     case 0:
@@ -1366,16 +1835,16 @@ namespace ProceduralObjects
                                         }
                                         break;
                                 }
-                                #endregion
+#endregion
                             }
-                            #endregion
+#endregion
                         }
                         else
                         {
-                            #region deplacement SMOOTH + LENT
+#region deplacement SMOOTH + LENT
                             if (editingVertex)
                             {
-                                #region déplacement des vertex
+#region déplacement des vertex
                                 if (KeyBindingsManager.instance.GetBindingFromName("position_moveUp").GetBinding())
                                 {
                                     currentlyEditingObject.historyEditionBuffer.InitializeNewStep(EditingStep.StepType.vertices, currentlyEditingObject.vertices);
@@ -1418,11 +1887,11 @@ namespace ProceduralObjects
                                         currentlyEditingObject.vertices[v.Index].Position.x -= TimeUtils.deltaTime;
                                     Apply();
                                 }
-                                #endregion
+#endregion
                             }
                             else if (editingWholeModel && axisState == AxisEditionState.none)
                             {
-                                #region déplacement du modèle
+#region déplacement du modèle
                                 switch (actionMode)
                                 {
                                     case 0:
@@ -1532,13 +2001,13 @@ namespace ProceduralObjects
                                         }
                                         break;
                                 }
-                                #endregion
+#endregion
                             }
-                            #endregion
+#endregion
                         }
                         if (editingVertex)
                         {
-                            #region confirm edition steps
+#region confirm edition steps
                             if (KeyBindingsManager.instance.GetBindingFromName("position_moveUp").GetBindingUp())
                             {
                                 currentlyEditingObject.historyEditionBuffer.ConfirmNewStep(currentlyEditingObject.vertices);
@@ -1563,7 +2032,7 @@ namespace ProceduralObjects
                             {
                                 currentlyEditingObject.historyEditionBuffer.ConfirmNewStep(currentlyEditingObject.vertices);
                             }
-                            #endregion
+#endregion
                         }
                     }
                     else
@@ -1571,10 +2040,10 @@ namespace ProceduralObjects
                         // SACADE
                         if (!KeyBindingsManager.instance.GetBindingFromName("edition_smallMovements").GetBinding())
                         {
-                            #region deplacement SACADE + VITE
+#region deplacement SACADE + VITE
                             if (editingVertex)
                             {
-                                #region déplacement des vertex
+#region déplacement des vertex
                                 if (KeyBindingsManager.instance.GetBindingFromName("position_moveUp").GetBindingDown())
                                 {
                                     currentlyEditingObject.historyEditionBuffer.InitializeNewStep(EditingStep.StepType.vertices, currentlyEditingObject.vertices);
@@ -1629,11 +2098,11 @@ namespace ProceduralObjects
                                         currentlyEditingObject.historyEditionBuffer.ConfirmNewStep(currentlyEditingObject.vertices);
                                     Apply();
                                 }
-                                #endregion
+#endregion
                             }
                             else if (editingWholeModel && axisState == AxisEditionState.none)
                             {
-                                #region déplacement du modèle
+#region déplacement du modèle
                                 switch (actionMode)
                                 {
                                     case 0:
@@ -1742,16 +2211,16 @@ namespace ProceduralObjects
                                         }
                                         break;
                                 }
-                                #endregion
+#endregion
                             }
-                            #endregion
+#endregion
                         }
                         else
                         {
-                            #region deplacement SACADE + LENT
+#region deplacement SACADE + LENT
                             if (editingVertex)
                             {
-                                #region déplacement des vertex
+#region déplacement des vertex
                                 if (KeyBindingsManager.instance.GetBindingFromName("position_moveUp").GetBindingDown())
                                 {
                                     currentlyEditingObject.historyEditionBuffer.InitializeNewStep(EditingStep.StepType.vertices, currentlyEditingObject.vertices);
@@ -1806,11 +2275,11 @@ namespace ProceduralObjects
                                         currentlyEditingObject.historyEditionBuffer.ConfirmNewStep(currentlyEditingObject.vertices);
                                     Apply();
                                 }
-                                #endregion
+#endregion
                             }
                             else if (editingWholeModel && axisState == AxisEditionState.none)
                             {
-                                #region déplacement du modèle
+#region déplacement du modèle
                                 switch (actionMode)
                                 {
                                     case 0:
@@ -1920,14 +2389,33 @@ namespace ProceduralObjects
                                         }
                                         break;
                                 }
-                                #endregion
+#endregion
                             }
-                            #endregion
+#endregion
                         }
                     }
                 }
             }
             previousToolType = ToolsModifierControl.toolController.CurrentTool.GetType();
+
+            ChangeTracker.Tracker.Process();
+
+            // Performance metrics
+            totalUpdateTime = Math.Round((double)(DateTime.Now - updateStart).Ticks / 10000, 2);
+            poUpdateTimeSum += totalUpdateTime;
+            lastFrameTime = Math.Round((double)(DateTime.Now - lastUpdateFinishDateTime).Ticks / 10000, 2);
+            lastUpdateFinishDateTime = DateTime.Now;
+
+            if (frameCount == 1000)
+            {
+                Debug.Log($"[ProceduralObjects] In the most recent 1000 frames, calculating positions of Procedural Objects consumed {Math.Round(poCalcTimeSum / 1000, 2)} ms per frame, "
+                    + $"invoking DrawMesh for Procedural Objects consumed {Math.Round(poDrawMeshTimeSum / 1000, 2)} ms per frame. Total update time per frame is {Math.Round(poUpdateTimeSum / 1000, 2)} ms.");
+                frameCount = 0;
+                poCalcTimeSum = 0.0;
+                poDrawMeshTimeSum = 0.0;
+                poUpdateTimeSum = 0.0;
+            }
+
         }
 
 
@@ -1964,6 +2452,13 @@ namespace ProceduralObjects
                     var uiObj = (selectedGroup == null ? proceduralObjects.ToList() : selectedGroup.objects.ToList());
                     foreach (ProceduralObject obj in uiObj)
                     {
+                        if (obj == null) continue; // Temp test.
+                        //if (obj.isRootOfGroup)
+                        //{
+                        //    Debug.Log(string.Format("[ProceduralObjects] For group root {0}, its _insideUIview value is {1}.", obj.id, obj._insideUIview.ToString()));
+                        //    Matrix4x4 w2c = renderCamera.worldToCameraMatrix;
+                        //    Debug.Log(string.Format("[ProceduralObjects] For group root {0}, its IsInFrontOfCamera result is {1}.", obj.id, ProceduralUtils.IsInFrontOfCamera(ref w2c, obj.m_position).ToString()));
+                        //} // This is test as well.
                         if (selectedGroup == null)
                         {
                             if (obj.group != null && !obj.isRootOfGroup)
@@ -1996,7 +2491,7 @@ namespace ProceduralObjects
                                 {
                                     if (pObjSelection.Count == 1)
                                     {
-                                        #region
+#region
                                         bool isRoot = obj.group != null && obj.isRootOfGroup;
                                         float addedHeight = 0;
                                         if (isRoot && selectedGroup == null)
@@ -2096,7 +2591,10 @@ namespace ProceduralObjects
                                                     if (obj.group != null)
                                                         obj.group.Remove(this, obj);
                                                     moduleManager.DeleteAllModules(obj);
-                                                    proceduralObjects.Remove(obj);
+                                                    int seqNo = proceduralObjects.GetSeqNoWithId(obj.id);
+                                                    InvalidSeqCacheById(obj.id); // Caching Test
+                                                    //proceduralObjects[seqNo] = null;
+                                                    //proceduralObjects.Remove(obj);
                                                     activeIds.Remove(obj.id);
                                                     pObjSelection.Remove(obj);
                                                     hoveredObj = null;
@@ -2130,8 +2628,10 @@ namespace ProceduralObjects
                                                 var inclusiveSelection = (selectedGroup == null) ? POGroup.AllObjectsInSelection(pObjSelection, selectedGroup) : pObjSelection;
                                                 foreach (var po in inclusiveSelection)
                                                 {
+                                                    // Consider extracting these direct modifications to the PO fields into the ProceduralObject class of ProceduralClass.cs
                                                     po.m_color = color;
                                                     po.m_material.color = color;
+                                                    ChangeTracker.MarkMeshPropertiesDirty(proceduralObjects.GetSeqNoWithId(po.id));
                                                 }
                                             },
                                             () => { showLayerSetScroll = false; scrollLayerSet = Vector2.zero; showMoreTools = false; });
@@ -2186,11 +2686,11 @@ namespace ProceduralObjects
                                             GUI.color = Color.white;
                                             GUI.EndScrollView();
                                         }
-                                        #endregion
+#endregion
                                     }
                                     else
                                     {
-                                        #region
+#region
                                         bool isRoot = obj.group != null && obj.isRootOfGroup;
                                         float addedHeight = 0;
                                         if (selectedGroup == null)
@@ -2259,7 +2759,10 @@ namespace ProceduralObjects
                                                     if (po.group != null)
                                                         po.group.Remove(this, po);
                                                     moduleManager.DeleteAllModules(po);
-                                                    proceduralObjects.Remove(po);
+                                                    int seqNo = proceduralObjects.GetSeqNoWithId(po.id);
+                                                    InvalidSeqCacheById(po.id); // Caching Test
+                                                    //proceduralObjects[seqNo] = null;
+                                                    //proceduralObjects.Remove(po);
                                                     activeIds.Remove(po.id);
                                                 }
                                                 pObjSelection.Clear();
@@ -2320,7 +2823,7 @@ namespace ProceduralObjects
                                             }
                                             GUI.EndScrollView();
                                         }
-                                        #endregion
+#endregion
                                     }
                                 }
                                 else
@@ -2418,7 +2921,7 @@ namespace ProceduralObjects
                         advEdManager.DrawWindow();
                     }
 
-                    #region GUI when TOOL is active
+#region GUI when TOOL is active
                     if (currentlyEditingObject != null)
                     {
                         if (!editingWholeModel)
@@ -2567,7 +3070,7 @@ namespace ProceduralObjects
                                 }
                             }
                         }
-                    #endregion
+#endregion
                     }
                 }
                 else // if Move To Tool
@@ -2592,10 +3095,22 @@ namespace ProceduralObjects
             }
         }
 
+        void OnDestroy()
+        {
+            propertyBlock.Clear();
+            foreach (KeyValuePair<int, ComputeBuffer> kvp in equivalentArgsComputeBuffer)
+            {
+                kvp.Value?.Dispose();
+            }
+            foreach (KeyValuePair<int, ComputeBuffer> kvp in equivalentArgsComputeBuffer)
+            {
+                kvp.Value?.Dispose();
+            }
+        }
 
         public void DrawUIWindow(int id)
         {
-            #region setup window
+#region setup window
             GUI.DragWindow(new Rect(0, 0, 348, 30));
             string help = "Main_Page";
             if (proceduralTool && currentlyEditingObject != null)
@@ -2608,7 +3123,7 @@ namespace ProceduralObjects
             if (GUIUtils.CloseHelpButtons(window, help))
                 ClosePO();
 
-            #endregion
+#endregion
 
 
             if (proceduralTool && !reselectingTex)
@@ -3148,7 +3663,9 @@ namespace ProceduralObjects
                                         if (external.m_externalType == ClipboardProceduralObjects.ClipboardType.Single)
                                         {
                                             var obj = PlaceCacheObject(external.m_object, false);
-                                            obj.m_position = external.m_object._staticPos;
+                                            // Consider adding an event for object creation and insert it to the Quad during gameplay // Added inside PlaceCacheObject()
+                                            //obj.m_position = external.m_object._staticPos;
+                                            obj.SetPosition(external.m_object._staticPos);
                                             pObjSelection.Add(obj);
                                         }
                                         else if (external.m_externalType == ClipboardProceduralObjects.ClipboardType.Selection)
@@ -3157,7 +3674,8 @@ namespace ProceduralObjects
                                             foreach (var cache in external.m_selection.selection_objects.Keys.ToList())
                                             {
                                                 var obj = PlaceCacheObject(cache, false);
-                                                obj.m_position = cache._staticPos;
+                                                //obj.m_position = cache._staticPos;
+                                                obj.SetPosition(cache._staticPos);
                                                 pObjSelection.Add(obj);
                                                 created.Add(cache, obj);
                                             }
@@ -3223,6 +3741,7 @@ namespace ProceduralObjects
             else if (infoBase.infoType == "BUILDING")
                 v.ConstructObject(infoBase.buildingPrefab, proceduralObjects.GetNextUnusedId(), customTex);
             proceduralObjects.Add(v);
+            ChangeTracker.AddObjectToQuadTree(proceduralObjects.GetSeqNoWithId(v.id));
             SetCurrentlyEditingObj(v);
             return v;
         }
@@ -3232,6 +3751,7 @@ namespace ProceduralObjects
             ToolsModifierControl.mainToolbar.CloseEverything();
             var obj = new ProceduralObject(cacheObj, proceduralObjects.GetNextUnusedId(), ToolsModifierControl.cameraController.m_currentPosition + new Vector3(0, -8, 0), layerManager);
             proceduralObjects.Add(obj);
+            ChangeTracker.AddObjectToQuadTree(proceduralObjects.GetSeqNoWithId(obj.id));
             if (setCurrentlyEditing)
             {
                 SetCurrentlyEditingObj(obj);
@@ -3257,7 +3777,10 @@ namespace ProceduralObjects
         {
             external.CreateClipboard();
             if (external.m_externalType == ClipboardProceduralObjects.ClipboardType.Single)
+            {
                 PlaceCacheObject(external.m_object, true);
+                // Consider adding an event for object creation and insert it to the Quad during gameplay
+            }
             else
             {
                 selectedGroup = null;
@@ -3272,14 +3795,18 @@ namespace ProceduralObjects
             obj.id = proceduralObjects.GetNextUnusedId();
             CloneIntoObject(source, obj);
             proceduralObjects.Add(obj);
+            // Consider adding an event for object creation during gameplay
+            ChangeTracker.AddObjectToQuadTree(proceduralObjects.GetSeqNoWithId(obj.id));
             return obj;
         }
         public void CloneIntoObject(ProceduralObject source, ProceduralObject destination)
         {
             // destination.id = proceduralObjects.GetNextUnusedId();
             destination.m_material = GameObject.Instantiate(source.m_material);
-            destination.m_position = source.m_position;
-            destination.m_rotation = source.m_rotation;
+            //destination.m_position = source.m_position;
+            destination.SetPosition(source.m_position);
+            //destination.m_rotation = source.m_rotation;
+            destination.SetRotation(source.m_rotation);
             destination.customTexture = source.customTexture;
             destination.layer = source.layer;
             destination.tilingFactor = source.tilingFactor;
@@ -3486,7 +4013,10 @@ namespace ProceduralObjects
                         if (po.group != null)
                             po.group.Remove(this, po);
                         moduleManager.DeleteAllModules(po);
-                        proceduralObjects.Remove(po);
+                        int seqNo = proceduralObjects.GetSeqNoWithId(po.id);
+                        InvalidSeqCacheById(po.id); // Caching Test
+                        //proceduralObjects[seqNo] = null;
+                        //proceduralObjects.Remove(po);
                         activeIds.Remove(po.id);
                     }
                     ConfirmMovingWhole(false);
@@ -3555,6 +4085,19 @@ namespace ProceduralObjects
                 });
             }
         }
+
+        void OnDisable()
+        {
+            //if (meshPropertiesBuffer != null)
+            //    meshPropertiesBuffer.Release();
+            //meshPropertiesBuffer = null;
+
+            //if (argsBufferArray != null && argsBufferArray[0] != null)
+            //    argsBufferArray[0].Release();
+            //argsBufferArray[0] = null;
+            //argsBufferArray = null;
+        }
+
         private void CloseAllSMWindows()
         {
             CloseExternalsWindow();
@@ -3711,12 +4254,14 @@ namespace ProceduralObjects
                         {
                             obj = PlaceCacheObject(cache, false);
                             created.Add(cache, obj);
-                            obj.m_position = currentlyEditingObject.m_position + clipboard.selection_objects[cache];
+                            //obj.m_position = currentlyEditingObject.m_position + clipboard.selection_objects[cache];
+                            obj.SetPosition(currentlyEditingObject.m_position + clipboard.selection_objects[cache]);
                             obj.tempObj = new GameObject(obj.id.ToString());
                             obj.tempObj.transform.position = obj.m_position;
                             obj.tempObj.transform.rotation = obj.m_rotation;
                             obj.tempObj.transform.SetParent(currentlyEditingObject.tempObj.transform, true);
                         }
+                        // Consider adding an event for object creation and insert it to the Quad during gameplay // Added inside PlaceCacheObject()
                         moveToSelection.Add(obj, obj.tempObj.transform);
                         if (selectedGroup != null)
                             selectedGroup.AddToGroup(obj);
@@ -3765,6 +4310,9 @@ namespace ProceduralObjects
                     new EffectInfo.SpawnArea(currentlyEditingObject.m_position, Vector3.up, 10f), Vector3.zero, 0f, 1f, Singleton<AudioManager>.instance.DefaultGroup, 0u, true);
                 for (int i = 0; i < proceduralObjects.Count; i++)
                 {
+                    // Handle null objects due to change in object deletion logic.
+                    if (proceduralObjects[i] == null)
+                        continue;
                     proceduralObjects[i].historyEditionBuffer.ConfirmNewStep(currentlyEditingObject.vertices);
                     if (proceduralObjects[i] == currentlyEditingObject)
                         continue;
@@ -3853,8 +4401,12 @@ namespace ProceduralObjects
                 textManager.CloseWindow();
                 advEdManager = null;
                 moduleManager.DeleteAllModules(currentlyEditingObject);
-                proceduralObjects.Remove(currentlyEditingObject);
+                int seqNo = proceduralObjects.GetSeqNoWithId(currentlyEditingObject.id);
+                InvalidSeqCacheById(currentlyEditingObject.id); // Caching Test
+                //proceduralObjects[seqNo] = null;
+                //proceduralObjects.Remove(currentlyEditingObject);
                 activeIds.Remove(currentlyEditingObject.id);
+
                 if (currentlyEditingObject.group != null)
                     currentlyEditingObject.group.Remove(this, currentlyEditingObject);
                 //  Object.Destroy(currentlyEditingObject.gameObject);
@@ -4087,6 +4639,128 @@ namespace ProceduralObjects
              }
              return dictionary;
          } */
+
+        //public class Tuple<T1, T2, T3>
+        //{
+        //    public T1 First { get; private set; }
+        //    public T2 Second { get; private set; }
+        //    public T3 Third { get; private set; }
+        //    internal Tuple(T1 first, T2 second, T3 third)
+        //    {
+        //        First = first;
+        //        Second = second;
+        //        Third = third;
+        //    }
+        //}
+
+        //public struct MatrixShadowColor
+        //{
+        //    public Matrix4x4 m4x4;
+        //    public ShadowCastingMode shadowCastingMode;
+        //    public Color color;
+
+        //    public MatrixShadowColor(Matrix4x4 m4x4, ShadowCastingMode shadowCastingMode, Color color) : this()
+        //    {
+        //        this.m4x4 = m4x4;
+        //        this.shadowCastingMode = shadowCastingMode;
+        //        this.color = color;
+        //    }
+        //}
+
+        //public struct PrecomputeBuffer
+        //{
+        //    public Vector3 pos;
+        //    public byte flags; // bit0 = hasMesh, bit1 = hasMaterial, bit2 = shaderInInstanced
+        //    public PrecomputeBuffer(Vector3 pos, bool hasMesh, bool hasMaterial, bool shaderIsInstanced)
+        //    {
+        //        this.pos = pos;
+        //        this.flags = 0;
+        //        if (hasMesh) flags |= 1;
+        //        if (hasMaterial) flags |= 2;
+        //        if (shaderIsInstanced) flags |= 4;
+        //    }
+
+        //    public bool HasMesh => (flags & 1) != 0;
+        //    public bool HasMaterial => (flags & 2) != 0;
+        //    public bool ShaderIsInstanced => (flags & 4) != 0;
+        //}
+
+        //public ProceduralObject GetCachedObjectById(int id)
+        //{
+        //    if (_groupRootCache.TryGetValue(id, out var cached))
+        //        return proceduralObjects[cached];
+        //    return null;
+        //}
+
+        public int GetCachedSeqNoById(int id)
+        {
+            if (_poIdToSeqNoCache.TryGetValue(id, out var cached))
+                return cached;
+            return -1;
+        }
+
+        public void AddObjectToCacheByListIndex(int index)
+        {
+            var id = proceduralObjects[index].id;
+            _poIdToSeqNoCache[id] = index;
+        }
+
+        public void InvalidSeqCacheById(int id)
+        {
+            int seqNo = proceduralObjects.GetSeqNoWithId(id);
+            if (seqNo > -1)
+            {
+                ChangeTracker.RemoveObjectFromQuadTree(seqNo);
+            }
+            if (_poIdToSeqNoCache.ContainsKey(id)) 
+            {
+                _poIdToSeqNoCache.Remove(id);
+            }
+        }
+
+        public struct SortingLists
+        {
+            public Dictionary<int, List<MeshProperties>> localBatchDict;
+            public List<int> localUnbatchedList;
+            //public HashSet<int> localVisibilitySet;
+
+            public SortingLists(Dictionary<int, List<MeshProperties>> dict,  List<int> list) //, HashSet<int> set)
+            {
+                localBatchDict = dict;
+                localUnbatchedList = list;
+                //localVisibilitySet = set;
+            }
+        }
+
+        public struct MeshProperties
+        {
+            public Matrix4x4 position;
+            public Vector4 color;
+            public Vector4 castShadow;
+
+            public MeshProperties (Matrix4x4 matrix4X4, Vector4 castShadow, Vector4 Color)
+            {
+                position = matrix4X4;
+                this.castShadow = castShadow;
+                this.color = Color;
+            }
+
+            public MeshProperties(ProceduralObject obj)
+            {
+                this.position = Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one);
+                this.castShadow = !obj.disableCastShadows ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0);
+                this.color = obj.m_color;
+            }
+
+            public static int Size()
+            {
+                return
+                    sizeof(float) * 4 * 4 + // position;
+                    sizeof(float) * 4 +     // color;
+                    sizeof(float) * 4;      // castShadow;
+            }
+        }
+
     }
     public enum AxisEditionState
     {
