@@ -255,7 +255,7 @@ namespace ProceduralObjects.Classes
 
         public string GetObjHashString(ProceduralObject obj, SHA1 sha1)
         {
-            StringBuilder sb = new StringBuilder(obj._baseProp.name);
+            StringBuilder sb = new StringBuilder(obj.basePrefabName);
             sb.Append("_");
 
             // NOTE: If later it needs to rollback to have meshStatus == 1 objects skipping calculating SHA1 hashes, just modify here.
