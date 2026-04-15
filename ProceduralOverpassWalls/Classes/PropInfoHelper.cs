@@ -24,7 +24,7 @@ namespace ProceduralObjects.Classes
             if (_propInfos == null)
             {
                 _propInfos = Resources.FindObjectsOfTypeAll<PropInfo>();
-                _propCountTest = PrefabCollection<PropInfo>.LoadedCount();
+                _propCountTest = PrefabCollection<PropInfo>.PrefabCount();
                 Debug.Log(string.Format("[ProceduralObjects] PropInfoHelper loading, Unity returned all PropInfo in Resources counted as {0}, PropInfo from PrefabCollection provided by CO counted as {1}.", _propInfos.Count(), _propCountTest));
                 _propInfoCache = new Dictionary<string, PropInfo>();
             }

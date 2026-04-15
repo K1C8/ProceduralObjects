@@ -36,18 +36,31 @@ namespace ProceduralObjects
             ProceduralObjectContainer[] dataContainer = logic.GetContainerList();
             Layer[] layerContainer = logic.layerManager.m_layers.ToArray();
 
+            long trisCount = 0; 
+
+            foreach (ProceduralObjectContainer singleObjectData in dataContainer)
+            {
+                if (singleObjectData == null || singleObjectData.vertices == null)
+                {
+                    continue;
+                }
+                trisCount += singleObjectData.vertices.Length;
+            }
+
             try
             {
                 if (dataContainer != null)
                 {
                     bFormatter.Serialize(proceduralObjStream, dataContainer);
                     // TODO: Write byteArrayCopyTime to binary file for ref.
+#if DEBUG
                     DateTime startTime = DateTime.Now;
                     string formattedTime = startTime.ToString("yyyyMMddHHmmss");
                     string testOutputPath = string.Format($"D:\\Test\\original_{formattedTime}.bin");
 
                     File.WriteAllBytes(testOutputPath, proceduralObjStream.ToArray());
 
+#endif
                     var splittedDict = SplitArray(proceduralObjStream.ToArray());
                     foreach (string key in serializableDataManager.EnumerateData())
                     {
@@ -58,6 +71,8 @@ namespace ProceduralObjects
                         }
                     }
                     Debug.Log("[ProceduralObjects] Data saving : saving " + splittedDict.Count.ToString() + " splited data array(s).");
+                    Debug.Log("[ProceduralObjects] Data saving : saving " + trisCount.ToString() + " vertices(s), proceduralObjStream size is " + 
+                        proceduralObjStream.Length.ToString() + " bytes.");
                     foreach (KeyValuePair<string, byte[]> kvp in splittedDict)
                     {
                         serializableDataManager.SaveData(kvp.Key, kvp.Value);

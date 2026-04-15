@@ -7,9 +7,16 @@ namespace ProceduralObjects.Classes
     internal sealed class ChangeTracker
     {
         private static ChangeTracker _instance;
+        private static bool _isChanged = false;
         public static ChangeTracker Tracker
         {
             get { return _instance ?? (_instance = new ChangeTracker()); }
+        }
+
+        public static bool HasChangeLastFrame
+        {
+            get { return _isChanged; }
+            set { _isChanged = value; }
         }
 
         private readonly HashSet<int> _dirtyMeshProperties = new HashSet<int>();
@@ -78,6 +85,10 @@ namespace ProceduralObjects.Classes
                 Quad quad = ProceduralObjectsLogic.instance.proceduralObjects[seqNo]?.ownerQuad;
                 quad?.HandleObjectDirtyMeshProperties(seqNo);
             }
+            if (_dirtyMeshProperties.Count > 0)
+            {
+                _isChanged = true;
+            }
             _dirtyMeshProperties.Clear();
 
             foreach (int seqNo in _dirtyMesh)
@@ -91,6 +102,10 @@ namespace ProceduralObjects.Classes
 
                 Quad quad = ProceduralObjectsLogic.instance.proceduralObjects[seqNo]?.ownerQuad;
                 quad?.HandleObjectDirtyMesh(seqNo);
+            }
+            if (_dirtyMesh.Count > 0)
+            {
+                _isChanged = true;
             }
             _dirtyMesh.Clear();
 
@@ -106,12 +121,21 @@ namespace ProceduralObjects.Classes
                 Quad quad = ProceduralObjectsLogic.instance.proceduralObjects[seqNo]?.ownerQuad;
                 //quad?.HandleObjectDirtyMaterial(seqNo);
             }
+            if (_dirtyMaterial.Count > 0)
+            {
+                _isChanged = true;
+            }
             _dirtyMaterial.Clear();
 
             foreach (int seqNo in _dirtyShader)
             {
                 Debug.Log(string.Format("[ProceduralObjects] ChangeTracker is checking shader of seqNo {0}.", seqNo));
             }
+            if (_dirtyShader.Count > 0)
+            {
+                _isChanged = true;
+            }
+            _dirtyShader.Clear();
 
             foreach (int seqNo in _objectsToRemove)
             {
@@ -120,6 +144,10 @@ namespace ProceduralObjects.Classes
                 Quad quad = ProceduralObjectsLogic.instance.proceduralObjects[seqNo]?.ownerQuad;
                 quad?.RemoveObjectFromQuad(seqNo);
                 ProceduralObjectsLogic.instance.proceduralObjects[seqNo] = null;
+            }
+            if (_objectsToRemove.Count > 0)
+            {
+                _isChanged = true;
             }
             _objectsToRemove.Clear();
 
@@ -130,6 +158,10 @@ namespace ProceduralObjects.Classes
                 {
                     Debug.Log(string.Format("[ProceduralObjects] ChangeTracker encountered error when adding PO seqNo {0} to the QuadTree.", seqNo));
                 }
+            }
+            if (_objectsToAdd.Count > 0)
+            {
+                _isChanged = true;
             }
             _objectsToAdd.Clear();
         }

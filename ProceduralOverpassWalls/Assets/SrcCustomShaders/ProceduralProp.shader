@@ -262,7 +262,8 @@ Shader "Custom/ProceduralObject/Prop/TestShaderInd"
             float4 frag(v2f i) : SV_Target
             {
                 // ---- Atlas-safe UV ----
-                float2 uv = ClampUVToAtlas(i.uv, _AtlasRect);
+                // float2 uv = ClampUVToAtlas(i.uv, _AtlasRect);
+                float2 uv = i.uv;
 
                 // ---- Cutout ----
                 float4 aci = tex2D(_ACIMap, uv);
@@ -573,7 +574,8 @@ Shader "Custom/ProceduralObject/Prop/TestShaderInd"
             float4 frag(v2f i) : SV_Target
             {
                 // Atlas-safe UV clamp first (matches the multi_instance fragment)
-                float2 uv = ClampUVToAtlas(i.uv, _AtlasRect);
+                // float2 uv = ClampUVToAtlas(i.uv, _AtlasRect);
+                float2 uv = i.uv;
 
                 // Cutout (same inverted sense: discard if ACI.r > 0.5)
                 float4 aci = tex2D(_ACIMap, uv);
