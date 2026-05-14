@@ -34,7 +34,7 @@ namespace ProceduralObjects
         }
 
 
-        public static readonly string VERSION = "1.8.0 Pre-Alpha Build 2026.0415";
+        public static readonly string VERSION = "1.8.0 Pre-Alpha Build 2026.0513";
         public static readonly string DOCUMENTATION_URL = "http://proceduralobjects.shoutwiki.com/wiki/";
         public static readonly string SETTINGS_FILENAME = "ProceduralObjectsSettings";
         public static SettingsFile SettingsFile;

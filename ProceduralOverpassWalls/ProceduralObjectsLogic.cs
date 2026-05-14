@@ -279,7 +279,8 @@ namespace ProceduralObjects
             long updateCount = 0;
             prevVisibilityArray = new bool[proceduralObjects.Count];
 
-            if (isGPUSupportInstancing && proceduralObjects != null && loadedShaders.ContainsKey("Custom/ProceduralObject/Prop/testshaderind"))
+            if (isGPUSupportInstancing && proceduralObjects != null && 
+                loadedShaders.ContainsKey("Custom/ProceduralObject/Prop/testshaderind") && loadedShaders.ContainsKey("Custom/ProceduralObject/Prop/testdecalindshader"))
             {
                 if (SystemInfo.processorType.Contains("Intel"))
                 {
@@ -294,9 +295,13 @@ namespace ProceduralObjects
                 equivalentPropertiesComputeBuffer = new Dictionary<int, ComputeBuffer>();
                 equivalentArgsComputeBuffer = new Dictionary<int, ComputeBuffer>();
                 uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
-                loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testshaderind", out Shader instancedTestShader);
-                shaderConversionController = new ShaderConversionController();
-                shaderConversionController.DefaultPropInstancedShader = instancedTestShader;
+                loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testshaderind", out Shader instancedPropTestShader);
+                loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testdecalindshader", out Shader instancedDecalTestShader);
+                shaderConversionController = new ShaderConversionController
+                {
+                    DefaultPropInstancedShader = instancedPropTestShader,
+                    BlendDecalInstancedShader = instancedDecalTestShader
+                };
 
                 List<Quad> leafQuads = quadTree.GetLeafQuads();
                 HashSet<int> unbatchedPoSeqs = new HashSet<int>();
@@ -312,8 +317,9 @@ namespace ProceduralObjects
                         continue;
 
                     var obj = proceduralObjects[i];
-                    shaderConversionController.DefaultPropConvertToInstancedShader(obj);
-                    if (obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testshaderind"))
+                    shaderConversionController.ConvertToInstancedShader(obj);
+                    if (obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testshaderind") || 
+                        obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testdecalindshader"))
                     {
                         updateCount++;
                     }
@@ -4751,6 +4757,7 @@ namespace ProceduralObjects
                 position = matrix4X4;
                 this.castShadow = castShadow;
                 this.color = Color;
+                //this.color = new Vector4(Color.x, Color.y, Color.z, 1f); // temporary test use only
             }
 
             public MeshProperties(ProceduralObject obj)
@@ -4758,6 +4765,7 @@ namespace ProceduralObjects
                 this.position = Matrix4x4.TRS(obj.m_position, obj.m_rotation, Vector3.one);
                 this.castShadow = !obj.disableCastShadows ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0);
                 this.color = obj.m_color;
+                //this.color = new Vector4(obj.m_color.r, obj.m_color.g, obj.m_color.b, 1f); // temporary test use only
             }
 
             public static int Size()

@@ -127,7 +127,7 @@ namespace ProceduralObjects.Classes
                 m_material.enableInstancing = true;  // Test version
 
                 ProceduralUtils.InitMeshAndVertices(container, sourceProp.m_material.name, sourceProp.m_mesh, this);
-
+                meshStatus = 2; // Added back for backward compatibility
                 // Tests end
 
                 /*
