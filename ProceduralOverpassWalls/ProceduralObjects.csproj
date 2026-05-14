@@ -246,6 +246,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="Assets\Bundles\ShaderPOTest.unity3d" />
+    <None Include="Assets\SrcCustomShaders\ProceduralDecal.shader" />
     <None Include="Assets\SrcCustomShaders\ProceduralProp.shader" />
     <None Include="packages.config" />
   </ItemGroup>
