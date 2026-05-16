@@ -101,7 +101,7 @@ namespace ProceduralObjects.Classes
                 }
 
                 Quad quad = ProceduralObjectsLogic.instance.proceduralObjects[seqNo]?.ownerQuad;
-                quad?.HandleObjectDirtyMesh(seqNo);
+                quad?.HandleObjectDirtyMeshAndMaterial(seqNo);
             }
             if (_dirtyMesh.Count > 0)
             {
@@ -119,7 +119,7 @@ namespace ProceduralObjects.Classes
                 }
 
                 Quad quad = ProceduralObjectsLogic.instance.proceduralObjects[seqNo]?.ownerQuad;
-                //quad?.HandleObjectDirtyMaterial(seqNo);
+                quad?.HandleObjectDirtyMeshAndMaterial(seqNo);
             }
             if (_dirtyMaterial.Count > 0)
             {

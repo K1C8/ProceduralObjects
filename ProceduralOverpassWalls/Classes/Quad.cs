@@ -363,9 +363,9 @@ namespace ProceduralObjects.Classes
         }
 
         /// <summary>
-        /// The method to handle Procedural Objects with dirty mesh. Currently it only places object into an existing batch or unbatch the object.
+        /// The method to handle Procedural Objects with dirty mesh and material. Currently it only places object into an existing batch or unbatch the object.
         /// </summary>
-        public void HandleObjectDirtyMesh(int seqNo)
+        public void HandleObjectDirtyMeshAndMaterial(int seqNo)
         {
             ProceduralObject obj = IsPoInQuadAndValid(seqNo);
             if (null == obj) 

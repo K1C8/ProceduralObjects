@@ -215,6 +215,7 @@ namespace ProceduralObjects.ProceduralText
                         // try save on RAM usage
                         if (!TextParameters.IsEmpty(parametersOld))
                             oldTex.DisposeTexFromMemory();
+                        ChangeTracker.MarkMaterialDirty(ProceduralObjectsLogic.instance.proceduralObjects.GetSeqNoWithId(editingObject.id));
                     }
                     parametersOld = TextParameters.Clone(parameters, false);
                     updateTimer = 0f;
@@ -450,6 +451,7 @@ namespace ProceduralObjects.ProceduralText
                 parametersOld = TextParameters.Clone(editingObject.m_textParameters, false);
                 windowTex = parameters.ApplyParameters(originalTex);
                 editingObject.m_material.mainTexture = windowTex as Texture;
+                ChangeTracker.MarkMaterialDirty(ProceduralObjectsLogic.instance.proceduralObjects.GetSeqNoWithId(editingObject.id));
             }
             updateTimer = 0f;
             dragTimer = 0f;

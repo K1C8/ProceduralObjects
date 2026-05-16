@@ -932,7 +932,7 @@ namespace ProceduralObjects
                                 List<ProceduralObject> objects = (selectedGroup == null) ? proceduralObjects : selectedGroup.objects;
                                 foreach (var obj in objects)
                                 {
-                                    if (!obj._insideUIview)
+                                    if (obj == null || !obj._insideUIview)
                                         continue;
                                     if (selectedGroup == null)
                                     {
@@ -2856,6 +2856,7 @@ namespace ProceduralObjects
                         }
                         else
                             GUI.color = Color.white;
+                        // + sign button for selector of POs
                         if (GUI.Button(new Rect(objScreenPos + new Vector2(-11, -11), new Vector2(23, 22)), "<size=20>+</size>"))
                         {
                             PlaySound();
@@ -3605,6 +3606,7 @@ namespace ProceduralObjects
                                     currentlyEditingObject.m_material.mainTexture = currentlyEditingObject.m_textParameters.ApplyParameters(originalTex) as Texture;
                                 }
                             }
+                            ChangeTracker.MarkMaterialDirty(proceduralObjects.GetSeqNoWithId(currentlyEditingObject.id));
                         }
                         else
                         {

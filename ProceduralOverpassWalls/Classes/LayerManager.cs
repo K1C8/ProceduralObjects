@@ -121,6 +121,10 @@ namespace ProceduralObjects.Classes
         {
             foreach (var obj in objects)
             {
+                if (null == obj) 
+                { 
+                    continue; 
+                }
                 if (obj.layer == layer)
                     obj.layer = null;
             }
