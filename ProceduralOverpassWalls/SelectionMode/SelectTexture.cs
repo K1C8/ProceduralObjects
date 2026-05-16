@@ -70,6 +70,7 @@ namespace ProceduralObjects.SelectionMode
                         obj.m_material.mainTexture = obj.m_textParameters.ApplyParameters(originalTex) as Texture;
                     }
                 }
+                ChangeTracker.MarkMaterialDirty(ProceduralObjectsLogic.instance.proceduralObjects.GetSeqNoWithId(obj.id));
             }
         }
         public override Rect CollisionUI(Vector2 uiPos)
