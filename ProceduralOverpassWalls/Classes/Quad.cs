@@ -43,7 +43,9 @@ namespace ProceduralObjects.Classes
         private Vector3[] corners;
         private Vector3[] line;
         private string defaultPropShaderStr = "Custom/Props/Prop/Default";
+        private string defaultDecalShaderStr = "Custom/Props/Decal/Blend";
         private string batchedPropShaderStr = "Custom/ProceduralObject/Prop/testshaderind";
+        private string batchedDecalShaderStr = "Custom/ProceduralObject/Prop/testdecalindshader";
 
         // Debug line boxes
         GameObject lineObject;
@@ -255,7 +257,7 @@ namespace ProceduralObjects.Classes
 
         public string GetObjHashString(ProceduralObject obj, SHA1 sha1)
         {
-            StringBuilder sb = new StringBuilder(obj._baseProp.name);
+            StringBuilder sb = new StringBuilder(obj.basePrefabName);
             sb.Append("_");
 
             // NOTE: If later it needs to rollback to have meshStatus == 1 objects skipping calculating SHA1 hashes, just modify here.
@@ -361,9 +363,9 @@ namespace ProceduralObjects.Classes
         }
 
         /// <summary>
-        /// The method to handle Procedural Objects with dirty mesh. Currently it only places object into an existing batch or unbatch the object.
+        /// The method to handle Procedural Objects with dirty mesh and material. Currently it only places object into an existing batch or unbatch the object.
         /// </summary>
-        public void HandleObjectDirtyMesh(int seqNo)
+        public void HandleObjectDirtyMeshAndMaterial(int seqNo)
         {
             ProceduralObject obj = IsPoInQuadAndValid(seqNo);
             if (null == obj) 
@@ -524,8 +526,14 @@ namespace ProceduralObjects.Classes
             // cannot handle DrawMeshInstancedIndirect, that should make ALL POs unbatchable.
             // TODO: There are more conditions that should be taken into consideration but didn't find the
             // corresponding field names or the default values in ProceduralObject instances, for example, the RecalculateNormal flags. 
+            if (!SystemInfo.supportsInstancing)
+            {
+                return false;
+            }
+            // except default props and blend decals with no custom textures, all other props cannot be batched
             if (obj.baseInfoType == "BUILDING" || obj.customTexture != null || 
-                (!obj.m_material.shader.name.Equals(defaultPropShaderStr) && !obj.m_material.shader.name.Equals(batchedPropShaderStr)))
+                (!obj.m_material.shader.name.Equals(defaultPropShaderStr) && !obj.m_material.shader.name.Equals(batchedPropShaderStr) &&
+                !obj.m_material.shader.name.Equals(defaultDecalShaderStr) && !obj.m_material.shader.name.Equals(batchedDecalShaderStr)))
                 return false;
             return true;
         }
@@ -591,7 +599,7 @@ namespace ProceduralObjects.Classes
                     // TODO: Add the object to the shader checking queue, change the shader to batched shader.
                     if (conversionController != null)
                     {
-                        conversionController.DefaultPropConvertToInstancedShader(obj);
+                        conversionController.ConvertToInstancedShader(obj);
                     }
 
                     return handle;
@@ -605,7 +613,7 @@ namespace ProceduralObjects.Classes
             // TODO: Add the object to the shader checking queue, change the shader to the original shader.
             if (conversionController != null)
             {
-                conversionController.DefaultPropConvertToOriginalShader(obj);
+                conversionController.ConvertToOriginalShader(obj);
             }
 
             return handle;

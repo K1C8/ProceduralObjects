@@ -286,7 +286,8 @@ namespace ProceduralObjects.Classes
                 try
                 {
                     var obj = new ProceduralObject(c, logic.layerManager, props, buildings);
-                    string baseName = obj._baseProp == null ? obj._baseBuilding.name : obj._baseProp.name;
+                    //string baseName = obj._baseProp == null ? obj._baseBuilding.name : obj._baseProp.name;
+                    string baseName = obj.basePrefabName;
                     string shaderName = obj.m_material.shader == null ? "NO_SHADER_FOUND" : obj.m_material.shader.name;
                     Debug.Log($"[ProceduralObjects] Loading data for proceduralObjects number {logic.proceduralObjects.Count}, from container.id: {c.id}. Container object name is: {baseName}, meshStatus: {c.meshStatus}; object material shader: {shaderName}");
                     if (c.objectType == "PROP")
@@ -891,8 +892,8 @@ namespace ProceduralObjects.Classes
             return true;
         }
 
-        public static void TestPoInViewAndProcessMultiThreadWrapper(
-            List<int> viewPoSeqList, Matrix4x4 worldToCamera, Vector3 camPos, float sqrDynMinThreshold, bool isNightTime, bool[] visibilityArray)
+        public static bool TestPoInViewAndProcessMultiThreadWrapper(
+            List<int> viewPoSeqList, Matrix4x4 worldToCamera, Vector3 camPos, float sqrDynMinThreshold, bool isNightTime, bool[] visibilityArray, bool[] prevVisibilityArray)
         {
             int viewPoSeqListCount = viewPoSeqList.Count;
             int viewPoSeqListDefaultChunkSize = 500;
@@ -902,6 +903,7 @@ namespace ProceduralObjects.Classes
             int workerCount = Math.Min(ProceduralObjectsLogic.instance.maxThreadCount, defaultThreadCount);
             int chunkSize = (int)Math.Ceiling((double)viewPoSeqListCount / workerCount);
             float globalMultiplier = RenderOptions.instance.globalMultiplier;
+            bool isVisibilityChanged = false;
 
             Task[] tasks = new Task[workerCount];
 
@@ -923,11 +925,16 @@ namespace ProceduralObjects.Classes
                         {
                             visibilityArray[seqNo] = true;
                         }
+                        if (prevVisibilityArray == null || visibilityArray.Length != prevVisibilityArray.Length || visibilityArray[seqNo] != prevVisibilityArray[seqNo])
+                        {
+                            isVisibilityChanged = true;
+                        }
                     }
                 }, TaskCreationOptions.None);
 
             }
             Task.WaitAll(tasks);
+            return isVisibilityChanged;
         }
 
         public static bool IsInFrontOfCamera(ref Matrix4x4 w2c, Vector3 worldPos)
