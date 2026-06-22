@@ -1,15 +1,12 @@
 ﻿using ProtoBuf;
-using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using UnityEngine;
 using static ProceduralObjects.Classes.ProceduralUtils;
 using static ProceduralObjects.ProceduralObjectsLogic;
 using static ProceduralObjects.ProceduralText.TextParameters;
-using static System.Net.WebRequestMethods;
 
 namespace ProceduralObjects.Classes
 {
@@ -447,7 +444,7 @@ namespace ProceduralObjects.Classes
         {
             BatchHandle handle = poSeqBatchHandleDict[seqNo];
             allPoSeqSet.Remove(seqNo);
-            // Problematic way to handle this... 
+
             RemoveFromPreviousBatchingList(seqNo, handle);
             poSeqBatchHandleDict.Remove(seqNo);
             int seqNoIndexInAllPoSeqList = allPoSeqList.IndexOf(seqNo);
@@ -538,15 +535,15 @@ namespace ProceduralObjects.Classes
             return true;
         }
 
-        // Need to handle BatchHandles that swaped ahead and have their indexInList updated to the new index in the unbatchable/batched lists.
+        // Need to handle BatchHandles that swapped forward and have their indexInList updated to the new index in the unbatchable/batched lists.
         private void RemoveFromPreviousBatchingList(int seqNo, BatchHandle handle)
         {
             int indexToRemove = handle.indexInList;
             if (handle.identifierString == null && handle.objectStatus == ObjectStatus.Unbatched)
             {
-                // If the object to remove from list is not the last item, then it means another item (the previous last item in list) is required to be swapped ahead
+                // If the object to remove from list is not the last item, then it means another item (the previous last item in list) is required to be swapped forward
                 // to have the RemoveAtSwapBack to work.
-                if (indexToRemove < unbatchableList.Count - 1 && 0 < indexToRemove)
+                if (indexToRemove < unbatchableList.Count - 1 && 0 <= indexToRemove)
                 {
                     int seqNoLastItemUnbatchable = unbatchableList[unbatchableList.Count - 1];
                     BatchHandle handleLastItem = poSeqBatchHandleDict[seqNoLastItemUnbatchable];
@@ -558,13 +555,15 @@ namespace ProceduralObjects.Classes
             {
                 List<int> objPrevBatchPoSeqList = ResolveIntListByPoSeq(seqNo);
                 List<MeshProperties> objPrevBatchMeshPropertiesList = ResolveMeshPropertiesListByPoSeq(seqNo);
-                // If the object to remove from list is not the last item, then it means another item (the previous last item in list) is required to be swapped ahead
+                // If the object to remove from list is not the last item, then it means another item (the previous last item in list) is required to be swapped forward
                 // to have the RemoveAtSwapBack to work.
-                if (indexToRemove < objPrevBatchPoSeqList.Count - 1 && 0 < indexToRemove)
+                if (indexToRemove < objPrevBatchPoSeqList.Count - 1 && 0 <= indexToRemove)
                 {
-                    int seqNoLastItemUnbatchable = objPrevBatchPoSeqList[objPrevBatchPoSeqList.Count - 1];
-                    BatchHandle handleLastItem = poSeqBatchHandleDict[seqNoLastItemUnbatchable];
+                    int seqNoLastItemBatched = objPrevBatchPoSeqList[objPrevBatchPoSeqList.Count - 1];
+                    BatchHandle handleLastItem = poSeqBatchHandleDict[seqNoLastItemBatched];
                     handleLastItem.indexInList = indexToRemove;
+                    //Debug.Log(string.Format("[ProceduralObjects] RemoveFromPreviousBatchingList() updated original last item index to {0}, index before update {1}.",
+                    //    poSeqBatchHandleDict[seqNoLastItemBatched].indexInList, objPrevBatchPoSeqList.Count - 1));
                 }
                 objPrevBatchPoSeqList?.RemoveAtSwapBack(handle.indexInList);
                 objPrevBatchMeshPropertiesList?.RemoveAtSwapBack(handle.indexInList);
