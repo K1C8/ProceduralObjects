@@ -139,6 +139,7 @@ namespace ProceduralObjects
         private Dictionary<int, ComputeBuffer> equivalentArgsComputeBuffer;
         private uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
         private QuadTree quadTree;
+        private List<Quad> visibleLeafQuads, leafQuads;
         object dictLock = new object();
         object listLock = new object();
 
@@ -303,7 +304,8 @@ namespace ProceduralObjects
                     BlendDecalInstancedShader = instancedDecalTestShader
                 };
 
-                List<Quad> leafQuads = quadTree.GetLeafQuads();
+                leafQuads = quadTree.GetLeafQuads();
+                visibleLeafQuads = new List<Quad>();
                 HashSet<int> unbatchedPoSeqs = new HashSet<int>();
 
                 foreach (Quad quad in leafQuads)
@@ -459,7 +461,7 @@ namespace ProceduralObjects
                 //overlayList.Clear(); 
 
                 List<Quad> leafQuads = quadTree.GetLeafQuads();
-                List<Quad> visibleLeafQuads = new List<Quad>();
+                visibleLeafQuads.Clear();
                 frustum = GeometryUtility.CalculateFrustumPlanes(renderCamera);
                 List<int> viewportPoSeqList = HelperPool.GetIntList();
                 foreach (Quad quad in leafQuads)
