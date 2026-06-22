@@ -484,6 +484,13 @@ namespace ProceduralObjects.Classes
             ChangeTracker.MarkMeshPropertiesDirty(ProceduralObjectsLogic.instance.proceduralObjects.GetSeqNoWithId(id));
         }
 
+        public void SetColor(Color color)
+        {
+            m_color = color;
+            m_material.color = color;
+            ChangeTracker.MarkMeshPropertiesDirty(ProceduralObjectsLogic.instance.proceduralObjects.GetSeqNoWithId(id));
+        }
+
         public void ApplyModelChange()
         {
             List<Vector3> posArray = new List<Vector3>(vertices.GetPositionsArray());
