@@ -2645,9 +2645,10 @@ namespace ProceduralObjects
                                                 foreach (var po in inclusiveSelection)
                                                 {
                                                     // Consider extracting these direct modifications to the PO fields into the ProceduralObject class of ProceduralClass.cs
-                                                    po.m_color = color;
-                                                    po.m_material.color = color;
-                                                    ChangeTracker.MarkMeshPropertiesDirty(proceduralObjects.GetSeqNoWithId(po.id));
+                                                    //po.m_color = color;
+                                                    //po.m_material.color = color;
+                                                    //ChangeTracker.MarkMeshPropertiesDirty(proceduralObjects.GetSeqNoWithId(po.id));
+                                                    po.SetColor(color);
                                                 }
                                             },
                                             () => { showLayerSetScroll = false; scrollLayerSet = Vector2.zero; showMoreTools = false; });
@@ -2805,8 +2806,9 @@ namespace ProceduralObjects
                                                 var inclSelection = (selectedGroup == null) ? POGroup.AllObjectsInSelection(pObjSelection, selectedGroup) : pObjSelection;
                                                 foreach (var po in inclSelection)
                                                 {
-                                                    po.m_color = color;
-                                                    po.m_material.color = color;
+                                                    //po.m_color = color;
+                                                    //po.m_material.color = color;
+                                                    po.SetColor(color);
                                                 }
                                             },
                                             () => { showLayerSetScroll = false; scrollLayerSet = Vector2.zero; showMoreTools = false; });
