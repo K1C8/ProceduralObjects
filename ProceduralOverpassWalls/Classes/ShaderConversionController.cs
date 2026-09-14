@@ -36,8 +36,8 @@ namespace ProceduralObjects.Classes
             {
                 Material originalPropMat = PropInfoHelper.GetPropInfo(obj.basePrefabName).m_material;
                 obj.m_material.shader = originalPropMat.shader;
-                Debug.Log(string.Format("[ProceduralObjects] ShaderConversionController is converting an instanced shader of a PO to the original shader {0}.",
-                   originalPropMat.shader.name));
+                Debug.Log(string.Format("[ProceduralObjects] ShaderConversionController is converting an instanced shader of PO {0} to the original shader {1}.",
+                    ProceduralObjectsLogic.instance.proceduralObjects.GetSeqNoWithId(obj.id), originalPropMat.shader.name));
             }
         }
 
@@ -55,8 +55,8 @@ namespace ProceduralObjects.Classes
                 obj.m_material.shader = _blendDecalInstancedShader;
                 obj.m_material.enableInstancing = true;
             }
-            Debug.Log(string.Format("[ProceduralObjects] ShaderConversionController is converting the original shader of a PO to the instanced shader {0}.",
-                obj.m_material.shader.name));
+            Debug.Log(string.Format("[ProceduralObjects] ShaderConversionController is converting the original shader of PO {0} to the instanced shader {1}.",
+                ProceduralObjectsLogic.instance.proceduralObjects.GetSeqNoWithId(obj.id), obj.m_material.shader.name));
         }
 
     }

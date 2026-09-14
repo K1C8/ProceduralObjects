@@ -52,6 +52,7 @@ namespace ProceduralObjects.Classes
 
 
             Changelog = new string[] {
+                "1.8.0 change log: \n\n■ Enabled auto-batching and batch rendering for default props and decals, optimizing rendering time per frame.\n■ Optimized loading process for PO grouping to shorten loading time with PO groups.",
                 "1.7.8 changelog :\n\n■ New Popup for POs that failed to load (keep in memory/discard choice)\n■ Fixed Page Up / Page Down issue in Move To\n■ 3D axis movement : Movement value (distance, angle..) are now displayed ; Use Alt for slow movements\n■ Added Undo/Redo in Distort tool\n■ Fixed PO-decals render distance compatiblity with ULOD mod",
                 "1.7.7 changelog :\n\n■ New Selection mode actions : Distort, Project, in the \"more...\" dropdown menu. Works on selections of POs\n■ New options in Advanced Edition tools (cast shadows, reset 3D model)\n■ New Customization Tool actions (invert seleciton, split vertex)\n■ Minor tweaks (infinite render distance possible, draw tool improvements, etc.) & fixes\n\nCheckout the full changelog on the wiki",
                 "1.7.6 changelog :\n\n■ Revert of the saving process changes back to pre-1.7.5. Changes made in between updates should not be lost, unless you have saved a game with a buggy PO load.\n■ Ploppable asphalt reading fix\n■ Text Customization improvements\n■ Key bindings in settings panel\n\nCheckout the full changelog on the wiki",

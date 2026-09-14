@@ -93,8 +93,9 @@ namespace ProceduralObjects.SelectionMode
             {
                 float localdistdiff = Vector3.Project((po.m_position - maxObjects.Key.m_position).NullY(), (maxObjects.Value.m_position - maxObjects.Key.m_position).NullY()).magnitude;
                 var color = gradient.Evaluate(localdistdiff / distDiff);
-                po.m_color = color;
-                po.m_material.color = color;
+                //po.m_color = color;
+                //po.m_material.color = color;
+                po.SetColor(color);
             }
         }
         public override void ExitAction()
@@ -105,8 +106,9 @@ namespace ProceduralObjects.SelectionMode
                 {
                     foreach (var kvp in oldColors)
                     {
-                        kvp.Key.m_color = kvp.Value;
-                        kvp.Key.m_material.color = kvp.Value;
+                        //kvp.Key.m_color = kvp.Value;
+                        //kvp.Key.m_material.color = kvp.Value;
+                        kvp.Key.SetColor(kvp.Value);
                     }
                 }
                 if (gradientTex != null)

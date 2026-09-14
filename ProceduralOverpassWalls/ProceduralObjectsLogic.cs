@@ -130,6 +130,7 @@ namespace ProceduralObjects
         private List<int> unbatchedPoSeqList = new List<int>();
         //private List<int> overlayList = new List<int>();
         private MaterialPropertyBlock propertyBlock;
+        private MaterialPropertyBlock unbatchedBlock;
         //private Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]> equivalentDictCache;
         //private Dictionary<Mesh, Matrix4x4[]> equivalentTRSDictCache;
         //private Dictionary<Mesh, ShadowCastingMode[]> equivalentShadowCastingDictCache;
@@ -139,6 +140,7 @@ namespace ProceduralObjects
         private Dictionary<int, ComputeBuffer> equivalentArgsComputeBuffer;
         private uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
         private QuadTree quadTree;
+        private List<Quad> visibleLeafQuads, leafQuads;
         object dictLock = new object();
         object listLock = new object();
 
@@ -268,6 +270,8 @@ namespace ProceduralObjects
             //overlayList = new List<int>();
             propertyBlock = new MaterialPropertyBlock();
             //propertyBlock.SetColor("_Color", Color.white);
+            unbatchedBlock = new MaterialPropertyBlock();
+            unbatchedBlock.SetVector("_ObjectIndex", new Vector4(0f, 0f, 1f, 0f));
 
 
             //equivalentTRSDictCache = new Dictionary<Mesh, Matrix4x4[]>();
@@ -303,7 +307,8 @@ namespace ProceduralObjects
                     BlendDecalInstancedShader = instancedDecalTestShader
                 };
 
-                List<Quad> leafQuads = quadTree.GetLeafQuads();
+                leafQuads = quadTree.GetLeafQuads();
+                visibleLeafQuads = new List<Quad>();
                 HashSet<int> unbatchedPoSeqs = new HashSet<int>();
 
                 foreach (Quad quad in leafQuads)
@@ -459,7 +464,7 @@ namespace ProceduralObjects
                 //overlayList.Clear(); 
 
                 List<Quad> leafQuads = quadTree.GetLeafQuads();
-                List<Quad> visibleLeafQuads = new List<Quad>();
+                visibleLeafQuads.Clear();
                 frustum = GeometryUtility.CalculateFrustumPlanes(renderCamera);
                 List<int> viewportPoSeqList = HelperPool.GetIntList();
                 foreach (Quad quad in leafQuads)
@@ -726,7 +731,8 @@ namespace ProceduralObjects
                         propertyBlock.SetBuffer("_Properties", meshPropertiesBuffer);
                         try
                         {
-                            Graphics.DrawMeshInstancedIndirect(mesh, 0, material, new Bounds(Vector3.zero, new Vector3(32000f, 10240f, 32000f)), argsBuffer, 0, propertyBlock, ShadowCastingMode.On, true, 0, renderCamera);
+                            //Graphics.DrawMeshInstancedIndirect(mesh, 0, material, new Bounds(Vector3.zero, new Vector3(32000f, 10240f, 32000f)), argsBuffer, 0, propertyBlock, ShadowCastingMode.On, true, 0, renderCamera);
+                            Graphics.DrawMeshInstancedIndirect(mesh, 0, material, new Bounds(Vector3.zero, new Vector3(32000f, 10240f, 32000f)), argsBuffer, 0, propertyBlock, ShadowCastingMode.On, true, 0, null);
                             totalBatchCount++;
                             totalBatchedPoCount += currentBatchSize;
                         }
@@ -740,7 +746,7 @@ namespace ProceduralObjects
                     {
                         ProceduralObject obj = proceduralObjects[index];
                         Graphics.DrawMesh(obj.m_mesh, obj.m_position, obj.m_rotation,
-                            obj.m_material, 0, null, 0, null, !obj.disableCastShadows, true);
+                            obj.m_material, 0, null, 0, unbatchedBlock, !obj.disableCastShadows, true);
                     }
 
                     // If the user is hovering on single ungroupped object, or single object in a group when a group is selected, overlay it with purple.
@@ -2643,9 +2649,10 @@ namespace ProceduralObjects
                                                 foreach (var po in inclusiveSelection)
                                                 {
                                                     // Consider extracting these direct modifications to the PO fields into the ProceduralObject class of ProceduralClass.cs
-                                                    po.m_color = color;
-                                                    po.m_material.color = color;
-                                                    ChangeTracker.MarkMeshPropertiesDirty(proceduralObjects.GetSeqNoWithId(po.id));
+                                                    //po.m_color = color;
+                                                    //po.m_material.color = color;
+                                                    //ChangeTracker.MarkMeshPropertiesDirty(proceduralObjects.GetSeqNoWithId(po.id));
+                                                    po.SetColor(color);
                                                 }
                                             },
                                             () => { showLayerSetScroll = false; scrollLayerSet = Vector2.zero; showMoreTools = false; });
@@ -2803,8 +2810,9 @@ namespace ProceduralObjects
                                                 var inclSelection = (selectedGroup == null) ? POGroup.AllObjectsInSelection(pObjSelection, selectedGroup) : pObjSelection;
                                                 foreach (var po in inclSelection)
                                                 {
-                                                    po.m_color = color;
-                                                    po.m_material.color = color;
+                                                    //po.m_color = color;
+                                                    //po.m_material.color = color;
+                                                    po.SetColor(color);
                                                 }
                                             },
                                             () => { showLayerSetScroll = false; scrollLayerSet = Vector2.zero; showMoreTools = false; });

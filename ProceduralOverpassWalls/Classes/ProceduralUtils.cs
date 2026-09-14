@@ -2,9 +2,7 @@
 using ColossalFramework.IO;
 using ProceduralObjects.Tools;
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -959,6 +957,11 @@ namespace ProceduralObjects.Classes
                 if (kv.Value.Count > 0)
                 {
                     int headSeq = kv.Value[0];
+                    if (instance.proceduralObjects[headSeq] == null)
+                    {
+                        Debug.Log(string.Format("[ProceduralObjects] ProcessBatchablePoDict() encountered a null headSeq {0}.", headSeq));
+                        continue;
+                    }
                     if (!sortingList.localBatchDict.TryGetValue(headSeq, out List<MeshProperties> frameCacheDictList))
                     {
                         sortingList.localBatchDict[headSeq] = HelperPool.GetMeshPropsList();
