@@ -130,6 +130,7 @@ namespace ProceduralObjects
         private List<int> unbatchedPoSeqList = new List<int>();
         //private List<int> overlayList = new List<int>();
         private MaterialPropertyBlock propertyBlock;
+        private MaterialPropertyBlock unbatchedBlock;
         //private Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]> equivalentDictCache;
         //private Dictionary<Mesh, Matrix4x4[]> equivalentTRSDictCache;
         //private Dictionary<Mesh, ShadowCastingMode[]> equivalentShadowCastingDictCache;
@@ -269,6 +270,8 @@ namespace ProceduralObjects
             //overlayList = new List<int>();
             propertyBlock = new MaterialPropertyBlock();
             //propertyBlock.SetColor("_Color", Color.white);
+            unbatchedBlock = new MaterialPropertyBlock();
+            unbatchedBlock.SetVector("_ObjectIndex", new Vector4(0f, 0f, 1f, 0f));
 
 
             //equivalentTRSDictCache = new Dictionary<Mesh, Matrix4x4[]>();
@@ -728,7 +731,8 @@ namespace ProceduralObjects
                         propertyBlock.SetBuffer("_Properties", meshPropertiesBuffer);
                         try
                         {
-                            Graphics.DrawMeshInstancedIndirect(mesh, 0, material, new Bounds(Vector3.zero, new Vector3(32000f, 10240f, 32000f)), argsBuffer, 0, propertyBlock, ShadowCastingMode.On, true, 0, renderCamera);
+                            //Graphics.DrawMeshInstancedIndirect(mesh, 0, material, new Bounds(Vector3.zero, new Vector3(32000f, 10240f, 32000f)), argsBuffer, 0, propertyBlock, ShadowCastingMode.On, true, 0, renderCamera);
+                            Graphics.DrawMeshInstancedIndirect(mesh, 0, material, new Bounds(Vector3.zero, new Vector3(32000f, 10240f, 32000f)), argsBuffer, 0, propertyBlock, ShadowCastingMode.On, true, 0, null);
                             totalBatchCount++;
                             totalBatchedPoCount += currentBatchSize;
                         }
@@ -742,7 +746,7 @@ namespace ProceduralObjects
                     {
                         ProceduralObject obj = proceduralObjects[index];
                         Graphics.DrawMesh(obj.m_mesh, obj.m_position, obj.m_rotation,
-                            obj.m_material, 0, null, 0, null, !obj.disableCastShadows, true);
+                            obj.m_material, 0, null, 0, unbatchedBlock, !obj.disableCastShadows, true);
                     }
 
                     // If the user is hovering on single ungroupped object, or single object in a group when a group is selected, overlay it with purple.
