@@ -122,7 +122,7 @@ namespace ProceduralObjects.Classes
 
                 // Test version 241031
                 m_material = new Material(sourceProp.m_material); // Test version
-                Debug.Log("[ProceduralObjects] Task " + Task.CurrentId + " loading data from container.id: " + container.id + ". Container object name is " + _baseBuilding.name + ", container meshStatus = " + container.meshStatus);
+                // Debug.Log("[ProceduralObjects] Task " + Task.CurrentId + " loading data from container.id: " + container.id + ". Container object name is " + _baseBuilding.name + ", container meshStatus = " + container.meshStatus);
                 // m_material = sourceMaterial; // Multithreaded version
                 m_material.enableInstancing = true;  // Test version
 

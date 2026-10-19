@@ -133,7 +133,7 @@ namespace ProceduralObjects.Classes
                     }
                     else
                     {
-                        Debug.Log($"[ProceduralObjects] Quad {bounds.center} loaded repeated but insufficient meshes, meshId: {kv.Key}, count: {kv.Value.Count}");
+                        //Debug.Log($"[ProceduralObjects] Quad {bounds.center} loaded repeated but insufficient meshes, meshId: {kv.Key}, count: {kv.Value.Count}");
                         for (int i = 0; i < kv.Value.Count; i++)
                         {
                             int poSeq = kv.Value[i];
@@ -152,7 +152,7 @@ namespace ProceduralObjects.Classes
 
                 if (_batchedPropMeshCount > 0)
                 {
-                    Debug.Log($"[ProceduralObjects] In Quad {bounds.center}, total batchable meshes counting at: {_batchedPropMeshCount}.");
+                    Debug.Log($"[ProceduralObjects] In Quad {bounds.center}, total batchable meshes counting at: {_batchedPropMeshCount}, meshes unbatchable counting at: {unbatchableList.Count}.");
                 }
 
             }
@@ -598,7 +598,7 @@ namespace ProceduralObjects.Classes
                     // TODO: Add the object to the shader checking queue, change the shader to batched shader.
                     if (conversionController != null)
                     {
-                        conversionController.ConvertToInstancedShader(obj);
+                        conversionController.ConvertToInstancedShader(obj, true);
                     }
 
                     return handle;
@@ -612,7 +612,7 @@ namespace ProceduralObjects.Classes
             // TODO: Add the object to the shader checking queue, change the shader to the original shader.
             if (conversionController != null)
             {
-                conversionController.ConvertToOriginalShader(obj);
+                conversionController.ConvertToOriginalShader(obj, true);
             }
 
             return handle;

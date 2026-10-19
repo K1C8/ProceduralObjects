@@ -131,6 +131,8 @@ namespace ProceduralObjects
         //private List<int> overlayList = new List<int>();
         private MaterialPropertyBlock propertyBlock;
         private MaterialPropertyBlock unbatchedBlock;
+        private MaterialPropertyBlock copiesBlock;
+        private Bounds renderBounds;
         //private Dictionary<Mesh, Tuple<Matrix4x4, ShadowCastingMode, Color>[]> equivalentDictCache;
         //private Dictionary<Mesh, Matrix4x4[]> equivalentTRSDictCache;
         //private Dictionary<Mesh, ShadowCastingMode[]> equivalentShadowCastingDictCache;
@@ -138,6 +140,8 @@ namespace ProceduralObjects
         //private Dictionary<Mesh, Vector4[]> equivalentColorDictCache;
         private Dictionary<int, ComputeBuffer> equivalentPropertiesComputeBuffer;
         private Dictionary<int, ComputeBuffer> equivalentArgsComputeBuffer;
+        private ComputeBuffer copiesObjPropertiesComputeBuffer;
+        private ComputeBuffer copiesObjArgsComputeBuffer;
         private uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
         private QuadTree quadTree;
         private List<Quad> visibleLeafQuads, leafQuads;
@@ -269,10 +273,10 @@ namespace ProceduralObjects
             unbatchedPoSeqList = new List<int>();
             //overlayList = new List<int>();
             propertyBlock = new MaterialPropertyBlock();
-            //propertyBlock.SetColor("_Color", Color.white);
             unbatchedBlock = new MaterialPropertyBlock();
             unbatchedBlock.SetVector("_ObjectIndex", new Vector4(0f, 0f, 1f, 0f));
-
+            copiesBlock = new MaterialPropertyBlock();
+            renderBounds = new Bounds(Vector3.zero, new Vector3(32000f, 15360f, 32000f));
 
             //equivalentTRSDictCache = new Dictionary<Mesh, Matrix4x4[]>();
             //equivalentShadowCastingDictCache = new Dictionary<Mesh, ShadowCastingMode[]>();
@@ -298,6 +302,8 @@ namespace ProceduralObjects
                 //string shadeCastingKeyword = "SHADOWS_SCREEN";
                 equivalentPropertiesComputeBuffer = new Dictionary<int, ComputeBuffer>();
                 equivalentArgsComputeBuffer = new Dictionary<int, ComputeBuffer>();
+                copiesObjPropertiesComputeBuffer = new ComputeBuffer(1, MeshProperties.Size());
+                copiesObjArgsComputeBuffer = new ComputeBuffer(1, 5 * sizeof(uint), ComputeBufferType.IndirectArguments);
                 uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
                 loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testshaderind", out Shader instancedPropTestShader);
                 loadedShaders.TryGetValue("Custom/ProceduralObject/Prop/testdecalindshader", out Shader instancedDecalTestShader);
@@ -322,7 +328,7 @@ namespace ProceduralObjects
                         continue;
 
                     var obj = proceduralObjects[i];
-                    shaderConversionController.ConvertToInstancedShader(obj);
+                    shaderConversionController.ConvertToInstancedShader(obj, false);
                     if (obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testshaderind") || 
                         obj.m_material.shader.name.Equals("Custom/ProceduralObject/Prop/testdecalindshader"))
                     {
@@ -349,7 +355,7 @@ namespace ProceduralObjects
             lastUpdateFinishDateTime = DateTime.Now;
 
             loadingTime = Math.Round((DateTime.Now - startTime).TotalSeconds, 2);
-            Debug.Log("[ProceduralObjects] Game start procedure updated " + updateCount + " procedural objects with test shader.");
+            Debug.Log("[ProceduralObjects] Game start procedure updated " + updateCount + " procedural objects with instanced rendering shader.");
             Debug.Log("[ProceduralObjects] Game start procedure ended in " + loadingTime + " seconds");
             
         }
@@ -505,10 +511,6 @@ namespace ProceduralObjects
                         }
 
                         ProceduralUtils.ProcessBatchablePoDict(localLists, current.batchCustomPoIdDict, current.batchCustomArrayDict, visibilityArray);
-
-                        //Debug.Log($"[ProceduralObjects] Quad {current.bounds.center} has {localLists.localUnbatchedList.Count} POs are unbatched, and has" +
-                        //    $" {localLists.localBatchDict.Count} types of batched POs.");
-
                         return localLists;
                     }, localLists =>
                     {
@@ -527,7 +529,7 @@ namespace ProceduralObjects
                                 }
                                 else if (existing.Length - equivalentDictUsageTracker[kv.Key] < kv.Value.Count)
                                 {
-                                    Debug.Log($"[ProceduralObjects] Processing result, current list {kv.Key} needs to be expanded to new capacity.");
+                                    //Debug.Log($"[ProceduralObjects] Processing result, current list {kv.Key} needs to be expanded to new capacity.");
                                     int newSize = Math.Max(existing.Length << 1, kv.Value.Count + equivalentDictUsageTracker[kv.Key]);
                                     if (newSize == 0)
                                     {
@@ -540,7 +542,7 @@ namespace ProceduralObjects
                                     existing = new MeshProperties[newSize];
                                     equivalentDict[kv.Key].CopyTo(existing, 0);
                                     equivalentDict[kv.Key] = existing;
-                                    Debug.Log($"[ProceduralObjects] Processing result, current list {kv.Key} has been expanded with a capacity of {newSize}.");
+                                    Debug.Log($"[ProceduralObjects] List {kv.Key} has been expanded with a capacity of {newSize}.");
                                 }
                                 if (kv.Value.Count > 0)
                                 {
@@ -556,7 +558,6 @@ namespace ProceduralObjects
                                 unbatchedPoSeqList.AddRange(localLists.localUnbatchedList);
                             }
                         }
-
                         HelperPool.ReturnIntMeshPropDict(localLists.localBatchDict);
                         HelperPool.ReturnIntList(localLists.localUnbatchedList);
                     });
@@ -684,7 +685,8 @@ namespace ProceduralObjects
                 }
             }
 
-            var poCalcTime = Math.Round((DateTime.Now - startTime).TotalMilliseconds, 2);
+            double poCalcTime = Math.Round((DateTime.Now - startTime).TotalMilliseconds, 2);
+            double poOtherDrawCallTime = poCalcTime;
             poCalcTimeSum += poCalcTime;
 
             if (proceduralObjects != null)
@@ -732,7 +734,7 @@ namespace ProceduralObjects
                         try
                         {
                             //Graphics.DrawMeshInstancedIndirect(mesh, 0, material, new Bounds(Vector3.zero, new Vector3(32000f, 10240f, 32000f)), argsBuffer, 0, propertyBlock, ShadowCastingMode.On, true, 0, renderCamera);
-                            Graphics.DrawMeshInstancedIndirect(mesh, 0, material, new Bounds(Vector3.zero, new Vector3(32000f, 10240f, 32000f)), argsBuffer, 0, propertyBlock, ShadowCastingMode.On, true, 0, null);
+                            Graphics.DrawMeshInstancedIndirect(mesh, 0, material, renderBounds, argsBuffer, 0, propertyBlock, ShadowCastingMode.On, true, 0, null);
                             totalBatchCount++;
                             totalBatchedPoCount += currentBatchSize;
                         }
@@ -741,6 +743,8 @@ namespace ProceduralObjects
                             Debug.LogError("[ProceduralObjects] Error while rendering mesh instanced indirect " + mesh.name + ": " + e.Message + " - Stack Trace : " + e.StackTrace);
                         }
                     }
+
+                    DateTime poOtherDrawCallStart = DateTime.Now;
 
                     foreach (var index in unbatchedPoSeqList)
                     {
@@ -768,7 +772,7 @@ namespace ProceduralObjects
                                 0, null, 0, null, false, false);
                         }
                     }
-
+                    poOtherDrawCallTime = Math.Round((DateTime.Now - poOtherDrawCallStart).TotalMilliseconds, 2);
 
                 }
                 catch (Exception e)
@@ -782,8 +786,8 @@ namespace ProceduralObjects
 
                 if (frameCount % 100 == 0)
                 {
-                    Debug.Log(string.Format("[ProceduralObjects] Batching process consumed {0} ms, last sorting equivalentDictCache consumed {1} ms to complete. {2} POs rendered batched in {3} batches, {4} POs rendered individually this frame.",
-                        totalBatchingTime, cacheSortTime, totalBatchedPoCount, totalBatchCount, unbatchedPoSeqList.Count));
+                    Debug.Log(string.Format("[ProceduralObjects] Batching process consumed {0} ms, last sorting equivalentDictCache in {1} ms. {2} POs rendered batched in {3} batches in {4} ms, and {5} POs rendered individually in {6} ms.",
+                        totalBatchingTime, cacheSortTime, totalBatchedPoCount, totalBatchCount, poDrawMeshTime - poOtherDrawCallTime, unbatchedPoSeqList.Count, poOtherDrawCallTime));
                 }
 
                 if (moduleManager.enabledModules.Count > 0)
@@ -1356,10 +1360,25 @@ namespace ProceduralObjects
                                         // HOLD Ctrl TO COPY STUFF + LINE COPY
                                         if (Input.GetKey(KeyCode.LeftControl) || Gizmos.useLineTool)
                                         {
+                                            bool isObjectBatched = (bool)(shaderConversionController?.IsObjectShaderInstanced(currentlyEditingObject));
+                                            Mesh currentObjMesh = currentlyEditingObject.m_mesh;
+                                            List<MeshProperties> copiesProperties = HelperPool.GetMeshPropsList();
                                             try
                                             {
-                                                Graphics.DrawMesh(currentlyEditingObject.m_mesh, currentlyEditingObject.historyEditionBuffer.prevTempPos,
-                                                    currentlyEditingObject.m_rotation, currentlyEditingObject.m_material, 0, renderCamera, 0, null, !currentlyEditingObject.disableCastShadows, true);
+                                                //Graphics.DrawMesh(currentlyEditingObject.m_mesh, currentlyEditingObject.historyEditionBuffer.prevTempPos,
+                                                //    currentlyEditingObject.m_rotation, currentlyEditingObject.m_material, 0, renderCamera, 0, null, !currentlyEditingObject.disableCastShadows, true);
+                                                if (!isObjectBatched)
+                                                {
+                                                    Graphics.DrawMesh(currentObjMesh, currentlyEditingObject.historyEditionBuffer.prevTempPos,
+                                                        currentlyEditingObject.m_rotation, currentlyEditingObject.m_material, 0, null, 0, null, !currentlyEditingObject.disableCastShadows, true);
+                                                }
+                                                else
+                                                {
+                                                    copiesProperties.Add(new MeshProperties(
+                                                        Matrix4x4.TRS(currentlyEditingObject.historyEditionBuffer.prevTempPos, currentlyEditingObject.m_rotation, Vector3.one),
+                                                        !currentlyEditingObject.disableCastShadows ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0),
+                                                        currentlyEditingObject.m_color));
+                                                }
                                             }
                                             catch { }
                                             if (Input.GetKeyDown(KeyCode.LeftShift))
@@ -1389,8 +1408,20 @@ namespace ProceduralObjects
                                                         try
                                                         {
                                                             // One frame drawing only.
-                                                            Graphics.DrawMesh(currentlyEditingObject.m_mesh, drawpos,
-                                                                currentlyEditingObject.m_rotation, currentlyEditingObject.m_material, 0, renderCamera, 0, null, !currentlyEditingObject.disableCastShadows, true);
+                                                            //Graphics.DrawMesh(currentlyEditingObject.m_mesh, drawpos,
+                                                            //    currentlyEditingObject.m_rotation, currentlyEditingObject.m_material, 0, renderCamera, 0, null, !currentlyEditingObject.disableCastShadows, true);
+                                                            if (!isObjectBatched)
+                                                            {
+                                                                Graphics.DrawMesh(currentObjMesh, drawpos,
+                                                                    currentlyEditingObject.m_rotation, currentlyEditingObject.m_material, 0, null, 0, null, !currentlyEditingObject.disableCastShadows, true);
+                                                            }
+                                                            else
+                                                            {
+                                                                copiesProperties.Add(new MeshProperties(
+                                                                    Matrix4x4.TRS(drawpos, currentlyEditingObject.m_rotation, Vector3.one),
+                                                                    !currentlyEditingObject.disableCastShadows ? new Vector4(1, 0, 0, 0) : new Vector4(0, 0, 0, 0),
+                                                                    currentlyEditingObject.m_color));
+                                                            }
                                                         }
                                                         catch { }
                                                         drawpos += Gizmos.posDiffSaved;
@@ -1401,6 +1432,24 @@ namespace ProceduralObjects
                                                 }
                                                 Gizmos.DetectRotationKeyboard();
                                             }
+                                            int copiesPropertiesCount = copiesProperties?.Count ?? 0;
+                                            if (isObjectBatched && copiesPropertiesCount > 0)
+                                            {
+                                                if (copiesObjPropertiesComputeBuffer == null || copiesObjPropertiesComputeBuffer.count < copiesPropertiesCount)
+                                                {
+                                                    copiesObjPropertiesComputeBuffer?.Release();
+                                                    copiesObjPropertiesComputeBuffer = new ComputeBuffer(copiesPropertiesCount, MeshProperties.Size());
+                                                }
+                                                args[0] = currentObjMesh.GetIndexCount(0);
+                                                args[1] = (uint)copiesPropertiesCount;
+                                                args[2] = currentObjMesh.GetIndexStart(0);
+                                                copiesObjArgsComputeBuffer.SetData(args);
+                                                copiesObjPropertiesComputeBuffer.SetData(copiesProperties.ToArray());
+                                                copiesBlock.SetBuffer("_Properties", copiesObjPropertiesComputeBuffer);
+                                                Graphics.DrawMeshInstancedIndirect(currentlyEditingObject.m_mesh, 0, currentlyEditingObject.m_material, renderBounds, 
+                                                    copiesObjArgsComputeBuffer, 0, copiesBlock, ShadowCastingMode.On, true, 0, null);
+                                                HelperPool.ReturnMeshPropsList(copiesProperties);
+                                            }    
                                         }
                                     }
                                     else if (actionMode == 1) // scale gizmo - Referential has no effect
@@ -2426,9 +2475,9 @@ namespace ProceduralObjects
             lastFrameTime = Math.Round((double)(DateTime.Now - lastUpdateFinishDateTime).Ticks / 10000, 2);
             lastUpdateFinishDateTime = DateTime.Now;
 
-            if (frameCount == 1000)
+            if (frameCount >= 1000 && frameCount % 100 == 0)
             {
-                Debug.Log($"[ProceduralObjects] In the most recent 1000 frames, calculating positions of Procedural Objects consumed {Math.Round(poCalcTimeSum / 1000, 2)} ms per frame, "
+                Debug.Log($"[ProceduralObjects] In the most recent {frameCount} frames, calculating positions of Procedural Objects consumed {Math.Round(poCalcTimeSum / 1000, 2)} ms per frame, "
                     + $"invoking DrawMesh for Procedural Objects consumed {Math.Round(poDrawMeshTimeSum / 1000, 2)} ms per frame. Total update time per frame is {Math.Round(poUpdateTimeSum / 1000, 2)} ms.");
                 frameCount = 0;
                 poCalcTimeSum = 0.0;
@@ -3125,10 +3174,15 @@ namespace ProceduralObjects
             {
                 kvp.Value?.Dispose();
             }
-            foreach (KeyValuePair<int, ComputeBuffer> kvp in equivalentArgsComputeBuffer)
+            foreach (KeyValuePair<int, ComputeBuffer> kvp in equivalentPropertiesComputeBuffer)
             {
                 kvp.Value?.Dispose();
             }
+            equivalentArgsComputeBuffer.Clear();
+            equivalentPropertiesComputeBuffer.Clear();
+            copiesObjArgsComputeBuffer?.Dispose();
+            copiesObjPropertiesComputeBuffer?.Dispose();
+            Debug.Log("[ProceduralObjects] Compute buffers disposed. OnDestroy() exiting.");
         }
 
         public void DrawUIWindow(int id)
@@ -4740,6 +4794,7 @@ namespace ProceduralObjects
             {
                 _poIdToSeqNoCache.Remove(id);
             }
+            Debug.Log($"Invalidated PO list SeqCache of ID: {id}, previous associated SeqNo: {seqNo}.");
         }
 
         public struct SortingLists
