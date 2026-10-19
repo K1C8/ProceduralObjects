@@ -29,19 +29,22 @@ namespace ProceduralObjects.Classes
             set { _blendDecalInstancedShader = value; }
         }
 
-        public void ConvertToOriginalShader(ProceduralObject obj)
+        public void ConvertToOriginalShader(ProceduralObject obj, bool shouldLog)
         {
             if (obj == null) return;
             if (obj.m_material.shader.name.Equals(_defaultPropInstancedShader.name) || obj.m_material.shader.name.Equals(_blendDecalInstancedShader.name))
             {
                 Material originalPropMat = PropInfoHelper.GetPropInfo(obj.basePrefabName).m_material;
                 obj.m_material.shader = originalPropMat.shader;
-                Debug.Log(string.Format("[ProceduralObjects] ShaderConversionController is converting an instanced shader of PO {0} to the original shader {1}.",
-                    ProceduralObjectsLogic.instance.proceduralObjects.GetSeqNoWithId(obj.id), originalPropMat.shader.name));
+                if (shouldLog)
+                {
+                    Debug.Log(string.Format("[ProceduralObjects] ShaderConversionController is converting an instanced shader of PO {0} to the original shader {1}.",
+                        ProceduralObjectsLogic.instance.proceduralObjects.GetSeqNoWithId(obj.id), originalPropMat.shader.name));
+                }
             }
         }
 
-        public void ConvertToInstancedShader(ProceduralObject obj)
+        public void ConvertToInstancedShader(ProceduralObject obj, bool shouldLog)
         {
             if (obj == null || _defaultPropInstancedShader == null || _blendDecalInstancedShader == null) { return; }
             if (obj.m_material.shader.name.Equals(_defaultPropOriginalShaderName))
@@ -55,8 +58,16 @@ namespace ProceduralObjects.Classes
                 obj.m_material.shader = _blendDecalInstancedShader;
                 obj.m_material.enableInstancing = true;
             }
-            Debug.Log(string.Format("[ProceduralObjects] ShaderConversionController is converting the original shader of PO {0} to the instanced shader {1}.",
-                ProceduralObjectsLogic.instance.proceduralObjects.GetSeqNoWithId(obj.id), obj.m_material.shader.name));
+            if (shouldLog)
+            {
+                Debug.Log(string.Format("[ProceduralObjects] ShaderConversionController is converting the original shader of PO {0} to the instanced shader {1}.",
+                    ProceduralObjectsLogic.instance.proceduralObjects.GetSeqNoWithId(obj.id), obj.m_material.shader.name));
+            }
+        }
+
+        public bool IsObjectShaderInstanced(ProceduralObject obj)
+        {
+            return obj.m_material.shader.name.Equals(_defaultPropInstancedShader.name) || obj.m_material.shader.name.Equals(_blendDecalInstancedShader.name);
         }
 
     }
